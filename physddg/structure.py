@@ -107,10 +107,25 @@ def _pick_altloc(res: gemmi.Residue) -> str:
     return max(occ, key=occ.get) if occ else ""
 
 
+def _read(path) -> gemmi.Structure:
+    try:
+        return gemmi.read_structure(str(path), merge_chain_parts=True)
+    except RuntimeError as e:          # e.g. misplaced/duplicated ANISOU records in hand-edited PDB files
+        if "ANISOU" not in str(e):
+            raise
+        import gzip
+        op = gzip.open if str(path).endswith(".gz") else open
+        with op(path, "rt") as fh:
+            txt = "".join(line for line in fh if not line.startswith("ANISOU"))
+        st = gemmi.read_pdb_string(txt)
+        st.merge_chain_parts()
+        return st
+
+
 def load_protein(path: str | Path, chains: str | list[str] | None = None, keep_het: bool = True,
                  min_occ: float = 0.0) -> Protein:
     """Load the first model of a PDB/mmCIF file. `chains` restricts to these auth chain ids."""
-    st = gemmi.read_structure(str(path), merge_chain_parts=True)
+    st = _read(path)
     st.setup_entities()
     model = st[0]
     want = None if chains is None else set(chains)
