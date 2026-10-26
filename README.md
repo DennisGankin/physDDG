@@ -67,7 +67,21 @@ mutant go through the same code path. The backbone is fixed.
   differs (FireProt ΔΔGs are ~1.7× larger). pH, temperature and salt are not inputs.
 
 ## Speed (one RTX 4090 unless noted; end to end incl. loading/annotation; `scripts/59_speed_benchmark.py`)
-SPEED_TABLE
+Full saturation scans (19 × L variants), wall clock incl. loading, annotation, features and scoring; 1 GPU =
+in-process with the model loaded (cold CLI start adds ≈ 4 s); 4 GPUs = sites sharded over one process per GPU
+(includes ≈ 5 s process spawn + CUDA init, so it only pays off for large proteins / stage 2).
+
+| protein (observed residues) | variants | stage 1, 1 GPU | stage 1, 4 GPUs | stage 2, 1 GPU | stage 2, 4 GPUs | FoldX 5.1 (5–10 CPU-s/mut) | KORPM (0.44 ms/mut, 1 core) |
+|---|---|---|---|---|---|---|---|
+| 7A38 A (59) | 1,121 | **0.6 s** (1,985/s) | 4.9 s | 1.7 s (664/s) | 6.2 s | 1.6–3.1 CPU-h | 0.5 s |
+| 1ZD0 A (141) | 2,679 | **1.4 s** (1,903/s) | 5.7 s | 3.9 s (695/s) | 7.4 s | 3.7–7.4 CPU-h | 1.2 s |
+| 6Q62 A (269) | 5,111 | **2.9 s** (1,775/s) | 6.4 s | 7.2 s (715/s) | 8.1 s | 7–14 CPU-h | 2.2 s |
+| 3EDF A (597) | 11,343 | **7.8 s** (1,460/s) | 8.8 s | 21.0 s (541/s) | 12.8 s | 16–32 CPU-h | 5.0 s |
+
+Whole benchmark tables on 4 GPUs (run_jobs: one process per GPU, CPU preparation overlapped):
+Megascale-test 28,172 variants / 28 structures: stage 1 **9.5 s** (2,957/s), stage 2 17.1 s;
+Domainome 532,501 variants / 518 structures: stage 1 **55 s** (9,719/s), stage 2 172 s (3,105/s).
+Target (300-residue saturation scan < 1 min on one 4090, stage 1) met with ~20× margin.
 
 ## Reproducibility (every result comes from a script; run with `PYTHONPATH=. .venv/bin/python scripts/<script>`)
 | step | scripts | outputs |

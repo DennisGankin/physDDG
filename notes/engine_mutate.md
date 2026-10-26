@@ -168,3 +168,37 @@ removed; identical bond sets, all energy tests pass).
 
 Note: `physddg/fit.py` sets torch's global default dtype to float64 on import; all SiteScan entry points now run under
 a float32 guard (`_float32`).
+
+## v3 (2026-10-26): packaged predictor, speed, tests
+- `physddg/predict.py`: `PhysDDG(weights=None|json, stage=1|2, device, mode='xtal'|'af').predict(structure, mutations |
+  scan_all=True, sites=..., terms=True)`; CLI `scripts/physddg predict ...` (single structure, `--scan-all`, `--table`,
+  `--gpus` sharding); `run_jobs` for many structures (one process per GPU, CPU preparation in a pool per GPU process).
+  Engine arrays/columns come from the same functions scripts/55 uses (`site_arrays`, `engine_columns`; reassembly
+  from the caches reproduces the committed feature files exactly); structure-statistics features from
+  `features_simple.site_table/variant_features`; transform mirrors `52.derive`; linear model `fit.predict`.
+  Check: predictions reproduce the fitting agent's stored B4 predictions exactly (max |Δ| = 0 on two Megascale-test
+  proteins in-process, ≤ 1.0e-5 through run_jobs) and B5 to ≤ 6e-6. WT→WT = 0 exactly by definition (the intercept
+  is not added); per-term contributions sum to ddg. Defaults: B4 (stage 1), B5 (stage 2 / `--mode af`).
+- Flags: wt_mismatch, site_not_found, site_missing_atoms, missing_atoms_8A, hetatm_5A, chain_break_10A, terminal,
+  low_plddt (AF mode), plus afmode.flags when available.
+- Tests (tests/test_mutate.py): the tautological WT→WT array check was replaced by (a) site-native independence:
+  moving the WT side chain (beyond CB) at the site leaves stage-1 F/⟨E⟩ unchanged to 1e-6 (stage 2: ≤ 1e-4, float32
+  rounding of the subtract-native-neighbour bookkeeping) while moving a neighbour's side chain changes them;
+  (b) predict() WT→WT = 0.000 and reproduction of the fitted model; (c) bitwise determinism across runs and across
+  GPUs 0/1 (stage 1 and 2).
+- Speed (scripts/59_speed_benchmark.py, results/mutate/speed_benchmark.csv): see README "Speed". Profile, 269-residue
+  stage-1 scan: engine 2.57 s (≈ 89% in per-site `env_energy` dense kernels, GPU-bound), CPU 0.28 s (load, annotate,
+  SASA, structure-statistics table). Tried / decided:
+  * torch.compile of the energy kernel: stage 1 no gain (2.47 → 2.85 s, dynamic shapes recompile), stage 2 −15%
+    (7.1 → 6.1 s), 60 s compile, ΔΔF drift 1e-4 → **not enabled** by default.
+  * multi-site batching in one kernel (per-candidate neighbour lists): 2× slower (padding to the largest list).
+  * fp16/bf16: not applied — r^-12 repulsion, Gaussian solvation and 1/r electrostatics overflow/lose precision in
+    half precision; the kernels are elementwise (no tensor-core matmuls), so the expected gain is small.
+  * CUDA graphs: shapes change per site (candidate and neighbour counts), not applicable without fixed padding,
+    which costs more than the launch overhead saved.
+  * Implemented wins: CPU preparation in a process pool overlapped with GPU work; one process per GPU with greedy
+    balancing; single-threaded BLAS in workers (64-thread OpenBLAS per process exhausted the process limit).
+    2 processes per GPU: no gain (GPU-bound).
+- Issue for the fitting agent: `physddg/fit.py` sets torch's global default dtype to float64 at import; pytest
+  collects tests/test_fit.py before test_energy.py runs, so `tests/test_energy.py::test_site_dependent_cap` fails in a
+  full `pytest tests/` run (passes alone). mutate/predict are guarded; the fix belongs in fit.py (local dtype).
