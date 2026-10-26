@@ -40,7 +40,7 @@ Decisions are logged as D<n> (see bottom). Dates are 2026.
 - [x] 4.2 Structure prep / topology / PDB-derived rotamer library (PISCES pc30 ≤1.8 Å, 9,266 chains; coverage top-20 96.6%, all 98.4% within 30°) / GPU NeRF builder (0.10 Å median rebuild RMSD, 24.5M res-rot/s) / env + Rama + entropy statistics — notes/engine_geometry.md
 - [ ] 4.3 GPU batched mutant packing
 - [x] 4.4 Energy terms on GPU: 11 separate terms (LJ atr/rep, EEF1 apolar/polar, H-bond sc-bb/sc-sc/bb-bb, Debye–Hückel / buried / distance-dep elec, disulfide); DSSP H-bond P/R 0.98/0.99; 10–80k variants/s — notes/engine_energy.md
-  - [~] 4.4b Parameter provenance verification (CHARMM19 vdW, EEF1 volumes) + StatTerms wiring (agent: E2)
+  - [x] 4.4b Parameters verified vs param19.inp + OSPREY eef1parm.dat (fixed dG_free != dG_ref for 11 types, amide N dG_ref); StatTerms wired; clash-free native recognition 0.70/0.71
 - [~] 4.3' Mutation pipeline: Stage 1 Boltzmann site model in fixed env, Stage 2 mean-field neighbour repacking, features for all datasets (agent: E1)
 - [ ] 4.5 Unfolded-state / reference model
 - [ ] 4.6 Parameter fitting (few interpretable weights, grouped CV)
