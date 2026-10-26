@@ -1,0 +1,2 @@
+pred,n,n_proteins,spearman,pearson,spearman_prot_median,rmse,rmse_fit,auroc_destab,auroc_stab,sign_acc,spearman_ci,spearman_prot_median_ci
+main,93,19,0.600837812838812,0.6369382134028971,0.7438775510204081,1.1162739527707384,0.8890333513200404,0.819675925925926,,0.7142857142857143,"[0.103,0.708]","[0.744,0.744]"

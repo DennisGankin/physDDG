@@ -1,0 +1,92 @@
+{
+ "bench": "ssym",
+ "split": null,
+ "subset": "homolog_in_korpm_train==0",
+ "predictors": {
+  "main": {
+   "pred": "/workspace/stability_hackathon/results/competitors/ddgun_ssym.csv:ddg_pred",
+   "metrics": {
+    "n": 22,
+    "n_proteins": 3,
+    "n_prot_eval": 1,
+    "target": "ddg",
+    "spearman": 0.06493506493506496,
+    "pearson": 0.06706703432691256,
+    "rmse": 2.0584058643927143,
+    "mae": 1.6267183181818183,
+    "rmse_fit": 2.0359048064708443,
+    "mae_fit": 1.6914233928352238,
+    "auroc_destab": NaN,
+    "auroc_stab": NaN,
+    "sign_acc": 0.6363636363636364,
+    "spearman_prot_median": 0.709090909090909,
+    "spearman_prot_mean": 0.709090909090909
+   },
+   "ci95": {
+    "spearman": [
+     -0.7857142857142857,
+     0.7187772925764192
+    ],
+    "pearson": [
+     -0.7410600526368452,
+     0.6892147691764853
+    ],
+    "rmse": [
+     0.9717573403535472,
+     2.857290992898824
+    ],
+    "mae": [
+     0.7257954999999999,
+     2.6729084999999997
+    ],
+    "rmse_fit": [
+     0.7978352251186603,
+     2.3126553748798715
+    ],
+    "mae_fit": [
+     0.7749821975047358,
+     2.109720675621011
+    ],
+    "auroc_destab": [
+     0.125,
+     0.6888888888888889
+    ],
+    "auroc_stab": [
+     0.125,
+     0.875
+    ],
+    "sign_acc": [
+     0.25,
+     1.0
+    ],
+    "spearman_prot_median": [
+     0.709090909090909,
+     0.709090909090909
+    ],
+    "spearman_prot_mean": [
+     0.709090909090909,
+     0.709090909090909
+    ]
+   },
+   "antisymmetry": {
+    "n_pairs": 11,
+    "r_pearson": 0.9837542155976872,
+    "r_spearman": 0.9727272727272729,
+    "bias": 0.047729727272727264,
+    "exp_r_pearson": 1.0,
+    "exp_bias": 0.0,
+    "pearson_direct": -0.0637404410168744,
+    "pearson_reverse": -0.12952044447991704
+   }
+  }
+ },
+ "merge": {
+  "main": {
+   "n_bench": 22,
+   "n_pred": 684,
+   "coverage": 1.0,
+   "dup_pred_keys": 0,
+   "offset": null
+  }
+ }
+}

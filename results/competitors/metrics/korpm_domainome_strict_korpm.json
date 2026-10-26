@@ -1,0 +1,54 @@
+{
+ "bench": "domainome",
+ "split": null,
+ "subset": "in_ddgun_subset==1,homolog_in_korpm_train==0",
+ "predictors": {
+  "main": {
+   "pred": "/workspace/stability_hackathon/results/competitors/korpm_domainome.csv:ddg_pred",
+   "metrics": {
+    "n": 37183,
+    "n_proteins": 40,
+    "n_prot_eval": 40,
+    "target": "score",
+    "spearman": 0.2920671619854507,
+    "pearson": 0.35228941040491474,
+    "rmse": NaN,
+    "mae": NaN,
+    "rmse_fit": NaN,
+    "mae_fit": NaN,
+    "auroc_destab": NaN,
+    "auroc_stab": NaN,
+    "sign_acc": NaN,
+    "spearman_prot_median": 0.2990988866942619,
+    "spearman_prot_mean": 0.2621546870452206
+   },
+   "ci95": {
+    "spearman": [
+     0.22728470553615263,
+     0.330700506122391
+    ],
+    "pearson": [
+     0.27707929021594674,
+     0.39543030499969645
+    ],
+    "spearman_prot_median": [
+     0.17620868603576578,
+     0.3587277547804055
+    ],
+    "spearman_prot_mean": [
+     0.1903743455981425,
+     0.31580760112735695
+    ]
+   }
+  }
+ },
+ "merge": {
+  "main": {
+   "n_bench": 37183,
+   "n_pred": 533636,
+   "coverage": 1.0,
+   "dup_pred_keys": 2528,
+   "offset": null
+  }
+ }
+}

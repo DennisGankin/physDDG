@@ -1,0 +1,54 @@
+{
+ "bench": "domainome",
+ "split": null,
+ "subset": "in_ddgun_subset==1",
+ "predictors": {
+  "main": {
+   "pred": "/workspace/stability_hackathon/results/competitors/ddgun3d_domainome.csv:ddg_pred",
+   "metrics": {
+    "n": 47794,
+    "n_proteins": 50,
+    "n_prot_eval": 50,
+    "target": "score",
+    "spearman": 0.26535292073574007,
+    "pearson": 0.3840083498110362,
+    "rmse": NaN,
+    "mae": NaN,
+    "rmse_fit": NaN,
+    "mae_fit": NaN,
+    "auroc_destab": NaN,
+    "auroc_stab": NaN,
+    "sign_acc": NaN,
+    "spearman_prot_median": 0.27756131025706565,
+    "spearman_prot_mean": 0.26705123478207665
+   },
+   "ci95": {
+    "spearman": [
+     0.23237733246663927,
+     0.2995248423733873
+    ],
+    "pearson": [
+     0.3472418369118545,
+     0.4213311110745093
+    ],
+    "spearman_prot_median": [
+     0.23386919645882248,
+     0.3150691102022789
+    ],
+    "spearman_prot_mean": [
+     0.23395466227700668,
+     0.3021912942586384
+    ]
+   }
+  }
+ },
+ "merge": {
+  "main": {
+   "n_bench": 47794,
+   "n_pred": 47794,
+   "coverage": 1.0,
+   "dup_pred_keys": 0,
+   "offset": null
+  }
+ }
+}

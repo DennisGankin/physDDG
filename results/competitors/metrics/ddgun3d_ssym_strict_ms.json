@@ -1,0 +1,92 @@
+{
+ "bench": "ssym",
+ "split": null,
+ "subset": "homolog_in_megascale_train==0",
+ "predictors": {
+  "main": {
+   "pred": "/workspace/stability_hackathon/results/competitors/ddgun3d_ssym.csv:ddg_pred",
+   "metrics": {
+    "n": 684,
+    "n_proteins": 15,
+    "n_prot_eval": 9,
+    "target": "ddg",
+    "spearman": 0.5339264079491836,
+    "pearson": 0.6374870480023982,
+    "rmse": 1.429643404459951,
+    "mae": 1.038572909356725,
+    "rmse_fit": 1.42772863164956,
+    "mae_fit": 1.0365231954577587,
+    "auroc_destab": 0.7923809523809524,
+    "auroc_stab": 0.7612684580004841,
+    "sign_acc": 0.6736526946107785,
+    "spearman_prot_median": 0.6492697044125243,
+    "spearman_prot_mean": 0.5362030831403664
+   },
+   "ci95": {
+    "spearman": [
+     0.3290602076568771,
+     0.6960329813770547
+    ],
+    "pearson": [
+     0.5255465310264579,
+     0.7944035970737686
+    ],
+    "rmse": [
+     1.0956166153986557,
+     1.8674144602229283
+    ],
+    "mae": [
+     0.7974538050476419,
+     1.466692920772058
+    ],
+    "rmse_fit": [
+     1.0848991264812724,
+     1.820719954120604
+    ],
+    "mae_fit": [
+     0.7898234075019267,
+     1.4046053918277133
+    ],
+    "auroc_destab": [
+     0.711097933723202,
+     0.8710404939270345
+    ],
+    "auroc_stab": [
+     0.6474566859564642,
+     0.8532754135291553
+    ],
+    "sign_acc": [
+     0.564155799588195,
+     0.7298466864490603
+    ],
+    "spearman_prot_median": [
+     0.3342908447264343,
+     0.759505913967678
+    ],
+    "spearman_prot_mean": [
+     0.3764832479157055,
+     0.7122713720115975
+    ]
+   },
+   "antisymmetry": {
+    "n_pairs": 342,
+    "r_pearson": 0.9912559888394986,
+    "r_spearman": 0.9959123375498414,
+    "bias": 0.03576189473684211,
+    "exp_r_pearson": 0.9999999999999999,
+    "exp_bias": 0.0,
+    "pearson_direct": 0.5561430903862539,
+    "pearson_reverse": 0.5335128591806182
+   }
+  }
+ },
+ "merge": {
+  "main": {
+   "n_bench": 684,
+   "n_pred": 684,
+   "coverage": 1.0,
+   "dup_pred_keys": 0,
+   "offset": null
+  }
+ }
+}

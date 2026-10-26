@@ -1,0 +1,82 @@
+{
+ "bench": "fireprot",
+ "split": "test",
+ "subset": "homolog_in_megascale_train==0",
+ "predictors": {
+  "main": {
+   "pred": "/workspace/stability_hackathon/results/competitors/ddgun3d_fireprot.csv:ddg_pred",
+   "metrics": {
+    "n": 341,
+    "n_proteins": 25,
+    "n_prot_eval": 9,
+    "target": "ddg",
+    "spearman": 0.43648635396611773,
+    "pearson": 0.48889792090545736,
+    "rmse": 2.016106321225961,
+    "mae": 1.3697925458269329,
+    "rmse_fit": 1.9937026756544727,
+    "mae_fit": 1.32645462652381,
+    "auroc_destab": 0.7513982102908278,
+    "auroc_stab": 0.6170798898071626,
+    "sign_acc": 0.712166172106825,
+    "spearman_prot_median": 0.47802197802197804,
+    "spearman_prot_mean": 0.3976635482029141
+   },
+   "ci95": {
+    "spearman": [
+     0.22235638693871526,
+     0.5645457066392519
+    ],
+    "pearson": [
+     0.21048835841479846,
+     0.6426385224772155
+    ],
+    "rmse": [
+     1.6495320560640228,
+     2.7144149262214037
+    ],
+    "mae": [
+     1.1442421426002134,
+     1.8588926770913337
+    ],
+    "rmse_fit": [
+     1.5057527621738394,
+     2.671657933864528
+    ],
+    "mae_fit": [
+     1.039529925413289,
+     1.7912066839357565
+    ],
+    "auroc_destab": [
+     0.6384522804054055,
+     0.8094423604187436
+    ],
+    "auroc_stab": [
+     0.523081554840904,
+     0.7363396112063161
+    ],
+    "sign_acc": [
+     0.6182206453945585,
+     0.8049063750714693
+    ],
+    "spearman_prot_median": [
+     0.1797414557129245,
+     0.6
+    ],
+    "spearman_prot_mean": [
+     0.19846479911967876,
+     0.5400567470870372
+    ]
+   }
+  }
+ },
+ "merge": {
+  "main": {
+   "n_bench": 341,
+   "n_pred": 347,
+   "coverage": 1.0,
+   "dup_pred_keys": 0,
+   "offset": null
+  }
+ }
+}

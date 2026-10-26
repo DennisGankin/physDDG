@@ -1,0 +1,54 @@
+{
+ "bench": "domainome",
+ "split": null,
+ "subset": null,
+ "predictors": {
+  "main": {
+   "pred": "results/competitors/korpm_domainome.csv:ddg_pred",
+   "metrics": {
+    "n": 532501,
+    "n_proteins": 518,
+    "n_prot_eval": 518,
+    "target": "score",
+    "spearman": 0.293570639331887,
+    "pearson": 0.34562140276562453,
+    "rmse": NaN,
+    "mae": NaN,
+    "rmse_fit": NaN,
+    "mae_fit": NaN,
+    "auroc_destab": NaN,
+    "auroc_stab": NaN,
+    "sign_acc": NaN,
+    "spearman_prot_median": 0.3016072976838504,
+    "spearman_prot_mean": 0.27847762262120634
+   },
+   "ci95": {
+    "spearman": [
+     0.25714663138205723,
+     0.3242654052153659
+    ],
+    "pearson": [
+     0.30273162598190323,
+     0.3836482838430537
+    ],
+    "spearman_prot_median": [
+     0.2500022596313021,
+     0.343408066823138
+    ],
+    "spearman_prot_mean": [
+     0.2375528988937032,
+     0.31574509119889127
+    ]
+   }
+  }
+ },
+ "merge": {
+  "main": {
+   "n_bench": 536164,
+   "n_pred": 533636,
+   "coverage": 0.9931681351228355,
+   "dup_pred_keys": 2528,
+   "offset": null
+  }
+ }
+}

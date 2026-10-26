@@ -1,0 +1,6 @@
+{"bench": "megascale", "n": 28172, "n_pred": 28172, "n_skipped": 0, "n_structures": 28, "wall_s": 2.3, "korpm_cpu_s": 46.0, "korpm_ms_per_mut_cpu": 1.63, "workers": 40}
+{"bench": "fireprot", "n": 347, "n_pred": 347, "n_skipped": 0, "n_structures": 27, "wall_s": 1.5, "korpm_cpu_s": 32.9, "korpm_ms_per_mut_cpu": 94.91, "workers": 40}
+{"bench": "s669", "n": 669, "n_pred": 667, "n_skipped": 2, "n_structures": 94, "wall_s": 4.1, "korpm_cpu_s": 115.4, "korpm_ms_per_mut_cpu": 172.97, "workers": 40}
+{"bench": "s461", "n": 461, "n_pred": 461, "n_skipped": 0, "n_structures": 48, "wall_s": 2.6, "korpm_cpu_s": 58.5, "korpm_ms_per_mut_cpu": 126.88, "workers": 40}
+{"bench": "ssym", "n": 684, "n_pred": 684, "n_skipped": 0, "n_structures": 357, "wall_s": 11.5, "korpm_cpu_s": 437.8, "korpm_ms_per_mut_cpu": 640.1, "workers": 40}
+{"bench": "domainome", "n": 536164, "n_pred": 532501, "n_skipped": 0, "n_structures": 518, "wall_s": 24.5, "korpm_cpu_s": 892.6, "korpm_ms_per_mut_cpu": 1.68, "workers": 40}
