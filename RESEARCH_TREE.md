@@ -50,7 +50,16 @@ Decisions are logged as D<n> (see bottom). Dates are 2026.
 - [x] 4.3 Mutation pipeline physddg/mutate.py: Stage 1 (Boltzmann site model, fixed env, ~1,900 mut/s/GPU) + Stage 2 (mean-field, site + ≤16 flexible neighbours, ~550 mut/s/GPU); features for 983k variants / 1,713 structures — notes/engine_mutate.md
   - Unfitted unit-weight ΔF: MS-test ρ 0.507 (S1) / 0.519 (S2), FP-test 0.276 / 0.308 (FoldX 0.569 / 0.449); χ recovery buried χ1 0.96 / χ1+2 0.94
   - [!] Ssym unfitted: direct vs reverse r = 0.13 / 0.04, bias +8 / +6 kcal/mol — each structure is adapted to its resident residue (a native-adaptation bias); fix must come from fitting + state-function design (D15)
-- [~] 4.6 Fit physics features B4 (Stage 1) / B5 (Stage 2), ablations, antisymmetry fix, G1/G2/G6 verdicts (agent: fit)
+- [x] 4.6 Fit physics features B4/B5 — notes/ladder_physics.md (fit on Megascale-train only; selection on val + grouped CV)
+  - [!] B4 0.677 / B5 0.687 per-protein ρ (MS-test natural; FoldX 0.629, tmol-refit 0.622, DDGun3D 0.516, KORPM 0.500); Pearson 0.68 vs FoldX 0.45; FP-test r 0.45–0.48 (≈ FoldX 0.41, n.s.); Domainome ρ_dom 0.41–0.44 (FoldX 0.43)
+  - G1 partial: B4−B3 +0.113 ✓; B4−B3+ +0.029 [−0.002,+0.051]; B5−B3+ +0.038 sig.; B4 ≥ FoldX+0.08 ✗ (+0.048); not decoration: energies-only loses 0.09, no-env loses 0.015
+  - G2: B5−B4 +0.010 overall ✗ (2/5 folds) but buried small→large +0.048 ✓ → ship Stage 1 default, Stage 2 for buried small→large / AF repacking
+  - [!] G6 passes: no sign flips, ratios 0.6–1.8; all energy weights positive (physical) even unconstrained
+  - [!] Antisymmetry defect is essentially lj_rep (r 0.29, dir+rev +7.5 kcal/mol); fitting cuts bias 8.0→1.4 but headline models aren't antisymmetric (r 0.59 only if WT-only main effects dropped)
+  - [-] Watch: stabilising precision@5 worse than FoldX (0.13–0.15 vs 0.22); all methods ≈ 0 at pLDDT<70 on Domainome; FoldX still better on buried small→large
+- [~] 4.7 D9 site-dependent cap variants + reverse scoring on modelled mutant + backbone-ensemble pre-test (agent: E1)
+- [~] 4.8 Residual analysis: where is the remaining error, candidate terms (agent: resid)
+- [~] 4.9 Independent audit: PDB-statistics leakage, fitting leakage, evaluation correctness, over-claims (agent: audit)
 - [ ] 4.5 Unfolded-state / reference model
 - [ ] 4.6 Parameter fitting (few interpretable weights, grouped CV)
 
