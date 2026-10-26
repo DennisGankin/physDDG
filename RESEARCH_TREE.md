@@ -30,7 +30,13 @@ Decisions are logged as D<n> (see bottom). Dates are 2026.
 
 ## 4. PhysDDG engine
 - [x] 4.1 Design doc v0 + independent critique (notes/critique_design_v0.md) → DESIGN v1 (D4–D10, gates G1–G7)
-- [~] 4.1b Fitting framework physddg/fit.py + baseline ladder B0–B3+ + G6 tooling (agent: fit)
+- [x] 4.1b Fitting framework physddg/fit.py (censored/Huber/rank losses, Δref prior+shared+nuisance, cluster weights, grouped CV, bootstrap SE) + baseline ladder — notes/baseline_ladder.md
+  - [!] B3+ (env potential + burial + Rama + Pro/Gly/SS indicators + Δref; 10+20 params, no side-chain modelling) = FoldX-level: MS-test natural per-protein ρ 0.648 vs FoldX 0.629 (n.s.), Pearson +0.18; FP-test r 0.43 vs 0.41; Domainome 0.39 vs 0.43
+  - [!] Signal sits across sites (site ρ 0.68) more than within sites (0.44); LOO site oracle 0.719 per-protein
+  - [!] Overpacking (ΔV+) has no signal beyond env potential; cavity (ΔV−) strong and transfers
+  - [!] Domainome penalises exposed →F/W/Y/I/L/V (in-cell abundance, not folding): Megascale Δref transfers in the core (ρ 0.84) not at the surface (ρ −0.09)
+  - [!] Ssym: every model with a WT-burial term is non-antisymmetric (bias +1.8–2.1) → D15
+  - [-] G6 on B3+: cis-Pro term flips sign, ΔV+ zero → removed; disulfide only fittable on FireProt; catalytic CXXC disulfides need an exception
 - [x] 4.2 Structure prep / topology / PDB-derived rotamer library (PISCES pc30 ≤1.8 Å, 9,266 chains; coverage top-20 96.6%, all 98.4% within 30°) / GPU NeRF builder (0.10 Å median rebuild RMSD, 24.5M res-rot/s) / env + Rama + entropy statistics — notes/engine_geometry.md
 - [ ] 4.3 GPU batched mutant packing
 - [x] 4.4 Energy terms on GPU: 11 separate terms (LJ atr/rep, EEF1 apolar/polar, H-bond sc-bb/sc-sc/bb-bb, Debye–Hückel / buried / distance-dep elec, disulfide); DSSP H-bond P/R 0.98/0.99; 10–80k variants/s — notes/engine_energy.md
@@ -47,6 +53,8 @@ Decisions are logged as D<n> (see bottom). Dates are 2026.
 - [ ] 6.1 Profiling, GPU kernels, throughput benchmark vs FoldX
 
 ## Decisions
+- D15 (10-26) Antisymmetry by construction: every term must be a difference of a state function S(aa, structure) between mutant and WT (burial-only / site-only terms are not allowed in the primary model; if used, only as a reported ablation). Reverse mutations are scored on the mutant structure.
+- D16 (10-26) Gate G1 re-based on the measured ladder: primary metric = Megascale-test natural per-protein median ρ; physics engine B4 must reach ≥ B3+ + 0.03 (≈ 0.68) and beat FoldX with paired-bootstrap CI excluding 0; B3 (2 weights) was too low a bar.
 - D14 (10-26) Repulsion radii scaled ×0.9 by default (raises native-χ recognition among non-clashing perturbations 28%→62%; calibrated on structures, not ΔΔG).
 - D4–D10 (10-26) see DESIGN.md v1 revisions (env statistical potential, Boltzmann averaging, symmetric site modelling, shrunk/nuisance reference energies, censoring-aware fitting, site-dependent repulsion cap, screened electrostatics).
 - D1 (10-26) Sign: ddg positive = destabilising, kcal/mol (FoldX convention); Megascale ddG_ML flipped at ingestion.
