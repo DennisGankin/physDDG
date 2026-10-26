@@ -1,0 +1,99 @@
+{
+ "name": "P1",
+ "created": "2026-10-26T15:58:49",
+ "git_commit": "c6ddfb4",
+ "config": {
+  "features": [
+   "s1_dE_lj_atr",
+   "s1_dE_lj_rep",
+   "s1_dE_solv_apolar",
+   "s1_dE_solv_polar",
+   "s1_dE_hb_sc_bb",
+   "s1_dE_hb_sc_sc",
+   "s1_dE_elec_dh",
+   "s1_dTS",
+   "d_env_cn_ss_bb",
+   "d_rama"
+  ],
+  "ref": true,
+  "ref_prior": null,
+  "ref_l2": 0.01,
+  "ref_nuisance": [],
+  "nuis_l2": 0.001,
+  "scale_offset": true,
+  "ref_dataset": "megascale",
+  "loss": "huber",
+  "huber_delta": 1.0,
+  "censor": true,
+  "rank_weight": 0.0,
+  "rank_margin": 0.5,
+  "rank_pairs": 1000,
+  "rank_tau": 0.5,
+  "weighting": "clusters",
+  "within": "rows",
+  "signs": {},
+  "l2": 1e-06,
+  "intercept": true,
+  "sym_pair": false,
+  "sym_l2": 0.01,
+  "seed": 0
+ },
+ "intercept": 0.4143789952668313,
+ "weights": {
+  "s1_dE_lj_atr": 0.13068338931856152,
+  "s1_dE_lj_rep": 0.013595157552543001,
+  "s1_dE_solv_apolar": 0.2240630796028465,
+  "s1_dE_solv_polar": 0.16805872040305445,
+  "s1_dE_hb_sc_bb": 0.29439857166420014,
+  "s1_dE_hb_sc_sc": 0.1459447504905196,
+  "s1_dE_elec_dh": 0.3182244309640871,
+  "s1_dTS": -0.0701820367966221,
+  "d_env_cn_ss_bb": 0.12652703409567048,
+  "d_rama": 0.2773518890335614
+ },
+ "ref": {
+  "A": -0.0008693457146727641,
+  "C": -0.49676291360269204,
+  "D": 0.0679188691883799,
+  "E": 0.1646129627547014,
+  "F": -0.01167208297596823,
+  "G": 0.140306263862807,
+  "H": 0.2998090206500704,
+  "I": -0.11149570966598624,
+  "K": 0.09973915868023617,
+  "L": -0.16688440591436823,
+  "M": -0.19153329696452204,
+  "N": 0.06663713995568227,
+  "P": 0.5771321513703338,
+  "Q": 0.0976682338163383,
+  "R": -0.07761178511787233,
+  "S": 0.00036805311473556997,
+  "T": -0.12915099730495702,
+  "V": -0.20810899146018225,
+  "W": -0.038848138744071135,
+  "Y": -0.08125418592800933
+ },
+ "sym_pair": {},
+ "nuisance": {
+  "scale": {},
+  "offset": {},
+  "sigma": {},
+  "delta_ref": {}
+ },
+ "converged": true,
+ "objective": 0.32329463555803944,
+ "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+ "train": {
+  "megascale": {
+   "n_rows": 227094,
+   "n_point": 215731,
+   "n_interval": 11363,
+   "n_proteins": 239,
+   "n_clusters": 96,
+   "total_weight": 1.0000000000000002
+  }
+ },
+ "provenance": {
+  "note": "AF-mode reference physics model, Megascale-train only"
+ }
+}

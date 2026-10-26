@@ -73,8 +73,23 @@ Decisions are logged as D<n> (see bottom). Dates are 2026.
 - [ ] 4.6 Parameter fitting (few interpretable weights, grouped CV)
 
 ## 5. AlphaFold mode
-- [~] 5.1 Xtal vs AF paired evaluation + Domainome by pLDDT band (agent: af)
-- [~] 5.2 AF treatments: trim/neutralise low pLDDT, pLDDT-modulated cap, shell repack, shrinkage; gate G5 (agent: af)
+- [x] 5.1 Xtal vs AF paired evaluation + Domainome by pLDDT band — notes/af_mode.md, results/af_mode/
+  - [!] 5.1a On the paired set the AF model is never worse than the crystal and is **better where the two differ**
+    (local RMSD 0.6–1 Å: raw ΔF ρ 0.463 AF vs 0.173 xtal; B4-class model +0.066). The fragile input is the crystal.
+  - [!] 5.1b Domainome's low-pLDDT failure is mostly a **burial confound**: at buried sites pLDDT 50–70 costs only
+    ~0.1 ρ, at exposed sites every physics model is ≈0 at *all* pLDDT. Biggest real failure modes: construct termini
+    (10% of rows, ρ 0.11–0.15) and metal sites (7%, FoldX 0.44→0.14).
+  - [x] 5.1c AF v4 vs v6 irrelevant (r 0.98, same ρ); **construct crop beats the full-length model** in every band.
+- [x] 5.2 AF treatments + gate G5 — physddg/afmode.py (trim, cap, repack, shrink, burial swap, flags)
+  - [x] G5 part 1 **PASS** for every fitted model (per-entity median AF↔xtal r: B3+ 0.982, P1 0.950, B4-class ≈0.95);
+    fails only for the unit-weight energy (0.837). Global repacking does not help (0.950 → 0.940) — keep AF side chains.
+  - [-] 5.2a pLDDT attenuation **does not ship**: +0.006…+0.022 ρ_dom, and the burial-matched control of the same
+    2-parameter logistic gives +0.014…+0.073. It is a burial calibration, not an AF correction (→ D8).
+  - [-] 5.2b pLDDT-modulated repulsion cap: 0.000; softer cap −0.004…−0.028. Backbone-only burial swap: ≤ +0.004.
+  - [x] 5.2c Default AF mode = MAVISp-style trim (<50 windows + <70 termini, packed-exempt) + construct crop +
+    stage-2 shell repack + flags. Trimming: 0.000…+0.009 ρ_dom, **+0.013…+0.017 on Megascale-test** (identical rows).
+  - [!] 5.2d **Flagging beats correcting**: withholding pLDDT<70 ∪ terminal ∪ exposed-hydrophobic-patch sites
+    (14% of rows) gains +0.038 ρ_dom for B4, +0.020 for B3+ — more than all treatments combined.
 
 ## 6. Speed & packaging
 - [~] 6.1 Predictor CLI/API (physddg predict), profiling, torch.compile / bf16 / multi-GPU, throughput table vs FoldX/KORPM, real WT→WT / no-native-rotamer tests, README (agent: E1)
