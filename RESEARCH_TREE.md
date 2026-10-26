@@ -47,13 +47,16 @@ Decisions are logged as D<n> (see bottom). Dates are 2026.
 - [ ] 4.3 GPU batched mutant packing
 - [x] 4.4 Energy terms on GPU: 11 separate terms (LJ atr/rep, EEF1 apolar/polar, H-bond sc-bb/sc-sc/bb-bb, Debye–Hückel / buried / distance-dep elec, disulfide); DSSP H-bond P/R 0.98/0.99; 10–80k variants/s — notes/engine_energy.md
   - [x] 4.4b Parameters verified vs param19.inp + OSPREY eef1parm.dat (fixed dG_free != dG_ref for 11 types, amide N dG_ref); StatTerms wired; clash-free native recognition 0.70/0.71
-- [~] 4.3' Mutation pipeline: Stage 1 Boltzmann site model in fixed env, Stage 2 mean-field neighbour repacking, features for all datasets (agent: E1)
+- [x] 4.3 Mutation pipeline physddg/mutate.py: Stage 1 (Boltzmann site model, fixed env, ~1,900 mut/s/GPU) + Stage 2 (mean-field, site + ≤16 flexible neighbours, ~550 mut/s/GPU); features for 983k variants / 1,713 structures — notes/engine_mutate.md
+  - Unfitted unit-weight ΔF: MS-test ρ 0.507 (S1) / 0.519 (S2), FP-test 0.276 / 0.308 (FoldX 0.569 / 0.449); χ recovery buried χ1 0.96 / χ1+2 0.94
+  - [!] Ssym unfitted: direct vs reverse r = 0.13 / 0.04, bias +8 / +6 kcal/mol — each structure is adapted to its resident residue (a native-adaptation bias); fix must come from fitting + state-function design (D15)
+- [~] 4.6 Fit physics features B4 (Stage 1) / B5 (Stage 2), ablations, antisymmetry fix, G1/G2/G6 verdicts (agent: fit)
 - [ ] 4.5 Unfolded-state / reference model
 - [ ] 4.6 Parameter fitting (few interpretable weights, grouped CV)
 
 ## 5. AlphaFold mode
-- [ ] 5.1 Xtal vs AF paired evaluation
-- [ ] 5.2 pLDDT-aware handling (trimming, confidence weighting, relaxation)
+- [~] 5.1 Xtal vs AF paired evaluation + Domainome by pLDDT band (agent: af)
+- [~] 5.2 AF treatments: trim/neutralise low pLDDT, pLDDT-modulated cap, shell repack, shrinkage; gate G5 (agent: af)
 
 ## 6. Speed
 - [ ] 6.1 Profiling, GPU kernels, throughput benchmark vs FoldX
