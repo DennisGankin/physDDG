@@ -839,45 +839,59 @@ def atom_solvation(blocks: Blocks, p: EnergyParams | None = None) -> torch.Tenso
 
 
 # ============================================================================= single-residue statistical terms
+KT = 0.5925   # kcal/mol at 298.15 K (statistical potentials in nats are converted with this)
+
+
 class StatTerms:
-    """Interface for single-residue statistical terms (tables supplied by E1's rotamer library module).
+    """Single-residue statistical terms from E1's PDB statistics (physddg/data/pdbstats.npz, rotlib.PDBStats),
+    as differentiable torch lookups, in kcal/mol (nats x KT).
 
-    rama(aa, phi, psi)  -> -kT ln P(phi, psi | aa) [kcal/mol], bilinear periodic interpolation on a grid
-    sc_entropy(aa)      -> side-chain conformational entropy term T*S_conf [kcal/mol] (from rotamer-library entropy)
-    Tables: rama_grid [20 (+ pre-Pro rows), n, n] over phi, psi in [-180, 180); sc_entropy [20]."""
+    rama(aa, phi, psi, next_is_pro=None)  E = -kT ln[P(phi,psi|aa)/P(phi,psi)], periodic bilinear on the 10° grid
+                                         (cell centres -175..175); pre-Pro map for non-Gly/Pro if next_is_pro
+    env(aa, ss3, cn)                     E_env = -kT ln[P(aa|cn bin, SS)/P(aa)] (D4), ss3 in {0:H,1:E,2:L}
+    sc_entropy(aa, ss="all")             T*S_conf of the side chain (rotameric entropy) [kcal/mol]
+    Identical numbers to rotlib.PDBStats (times KT), see tests/test_energy.py::test_stat_terms."""
 
-    def __init__(self, rama_grid=None, sc_entropy=None, device="cpu"):
-        self.rama_grid = None if rama_grid is None else torch.as_tensor(rama_grid, dtype=torch.float32, device=device)
-        self.sc_ent = None if sc_entropy is None else torch.as_tensor(sc_entropy, dtype=torch.float32, device=device)
+    def __init__(self, path=None, device="cpu", kT: float = KT, sc_kind: str = "sc_entropy_rotameric"):
+        from .rotlib import PDBStats
+        st = PDBStats(path) if path is not None else PDBStats()
+        d = st.d
+        f = lambda a: torch.as_tensor(np.asarray(a, np.float32), device=device)
+        self.kT = kT
+        names = list(st.rama_names)
+        self.rama_grid = f(d["rama_energy"]) * kT                                     # [24, 36, 36]
+        self.rama_row = torch.tensor([names.index(a) for a in topo.AA1], device=device)
+        self.prepro_row = names.index("prepro")
+        self.env_tab = f(d["env_cn_ss_energy"]) * kT                                  # [n_cn, 3, 20]
+        self.cn_edges = f(d["cn_edges"])
+        self.sc_tab = f(d[sc_kind]) * kT                                              # [20, 4]
+        self.ss_names = [str(x) for x in d["entropy_classes"]]
 
     @classmethod
     def from_library(cls, device="cpu"):
-        """Load E1's tables if available (physddg.rotlib: RAMA_GRID / SC_ENTROPY or functions of that name)."""
-        try:
-            from . import rotlib  # noqa: F401
-        except ImportError:
-            return cls(device=device)
-        get = lambda n: getattr(rotlib, n)() if callable(getattr(rotlib, n, None)) else getattr(rotlib, n, None)
-        rg = get("rama_grid") if hasattr(rotlib, "rama_grid") else getattr(rotlib, "RAMA_GRID", None)
-        se = get("sc_entropy") if hasattr(rotlib, "sc_entropy") else getattr(rotlib, "SC_ENTROPY", None)
-        return cls(rg, se, device)
+        return cls(device=device)
 
-    def rama(self, aa: torch.Tensor, phi: torch.Tensor, psi: torch.Tensor) -> torch.Tensor:
-        if self.rama_grid is None:
-            raise NotImplementedError("Ramachandran table not available yet (E1 rotlib)")
+    def rama(self, aa: torch.Tensor, phi: torch.Tensor, psi: torch.Tensor, next_is_pro=None) -> torch.Tensor:
+        row = self.rama_row[aa]
+        if next_is_pro is not None:
+            gp = (aa == topo.AA_INDEX["G"]) | (aa == topo.AA_INDEX["P"])
+            row = torch.where(torch.as_tensor(next_is_pro, device=row.device) & ~gp,
+                              torch.full_like(row, self.prepro_row), row)
         g = self.rama_grid
         n = g.shape[-1]
-        x = (phi + 180.0) / 360.0 * n - 0.5
-        y = (psi + 180.0) / 360.0 * n - 0.5
+        x = (phi + 175.0) / 10.0
+        y = (psi + 175.0) / 10.0
         x0, y0 = torch.floor(x), torch.floor(y)
         tx, ty = x - x0, y - y0
         i0, j0 = x0.long() % n, y0.long() % n
         i1, j1 = (i0 + 1) % n, (j0 + 1) % n
-        v = lambda i, j: g[aa, i, j]
+        v = lambda i, j: g[row, i, j]
         return (v(i0, j0) * (1 - tx) * (1 - ty) + v(i1, j0) * tx * (1 - ty) + v(i0, j1) * (1 - tx) * ty
                 + v(i1, j1) * tx * ty)
 
-    def sc_entropy(self, aa: torch.Tensor) -> torch.Tensor:
-        if self.sc_ent is None:
-            raise NotImplementedError("side-chain entropy table not available yet (E1 rotlib)")
-        return self.sc_ent[aa]
+    def env(self, aa: torch.Tensor, ss3: torch.Tensor, cn: torch.Tensor) -> torch.Tensor:
+        b = (torch.searchsorted(self.cn_edges, cn.contiguous(), right=True) - 1).clamp(0, self.env_tab.shape[0] - 1)
+        return self.env_tab[b, ss3, aa]
+
+    def sc_entropy(self, aa: torch.Tensor, ss: str = "all") -> torch.Tensor:
+        return self.sc_tab[aa, self.ss_names.index(ss)]

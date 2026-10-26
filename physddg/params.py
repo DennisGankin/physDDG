@@ -2,18 +2,20 @@
 
 Units: Å, Å^3, kcal/mol, elementary charge.
 
-Sources (heavy-atom / united-atom model, polar H not explicit):
-- vdW: CHARMM19 united-atom force field (param19, Brooks et al. 1983 J Comput Chem 4:187; Neria, Fischer &
-  Karplus 1996 J Chem Phys 105:1902), the force field EEF1 is built on. Values are Rmin/2 (Å) and well depth
-  ε (kcal/mol), combined as Rmin_ij = Rmin/2_i + Rmin/2_j, ε_ij = sqrt(ε_i ε_j).
-- Solvation: EEF1, Lazaridis & Karplus 1999 Proteins 35:133, Table I (CHARMM19 united-atom types): group
-  volume V (Å^3), ΔG_ref, ΔG_free (kcal/mol), correlation length λ (3.5 Å; 6.0 Å for charged groups).
-  The EEF1 Gaussian is centred at R_i = Rmin/2_i (param19). ΔH/ΔCp are not needed (298 K only).
-- Verification status (no copy of param19.inp / solvpar.inp could be retrieved, see notes/engine_energy.md):
-  ΔG_ref/ΔG_free/λ of all types except SH1E were cross-checked against the EEF1 table shipped in PLUMED
-  (src/colvar/EEFSolv.cpp, which carries the Lazaridis-Karplus ΔG values for CHARMM22/36 types).
-  Volumes and vdW values are the CHARMM19 numbers as recalled (flag `verified=False`); they enter the
-  model only through term-level fitted weights, so small deviations rescale a term rather than break it.
+Sources (heavy-atom / united-atom model, polar H not explicit). Every number below was verified against a
+public copy of the original parameter file (downloaded by scripts/44_fetch_energy_param_sources.sh, compared
+in tests/test_energy.py::test_params_match_sources):
+- vdW: CHARMM19 united-atom force field param19.inp (Brooks et al. 1983 J Comput Chem 4:187; Neria, Fischer &
+  Karplus 1996 J Chem Phys 105:1902), NONBONDED section: Rmin/2 (Å), well depth ε (kcal/mol) and the special
+  1-4 values (ε 0.1, Rmin/2 1.9 for the extended carbons). Combination: Rmin_ij = Rmin/2_i + Rmin/2_j,
+  ε_ij = sqrt(ε_i ε_j). verified: param19.inp (VMD trunctraj plugin copy).
+- Solvation: EEF1, Lazaridis & Karplus 1999 Proteins 35:133, Table I (CHARMM19 types): volume V (Å^3), ΔG_ref,
+  ΔG_free (kcal/mol), λ (3.5 Å; 6.0 Å for charged groups), R_i = Rmin/2 of param19.
+  verified: OSPREY3 config/eef1parm.dat (verbatim Table I, all 17 CHARMM19 types); ΔG_ref additionally agrees
+  with PLUMED src/colvar/EEFSolv.cpp (CHARMM22/36 port of the same table). ΔH/ΔCp are not needed (298 K).
+- History: the first version (10-26) used recalled values; verification corrected ΔG_free (EEF1 uses ΔG_free ≠
+  ΔG_ref for most types, e.g. NH1 -8.9 vs -5.95, CH3E 1.50 vs 1.089) and NH2 ΔG_ref (-5.45, was -5.95).
+  Radii, well depths and volumes were already correct.
 
 Adaptations to the 20-type PhysDDG vocabulary (topology.ATOM_TYPES):
 - CA -> CH1E for all residues (Gly CA is CH2E in CHARMM19; merged).
@@ -36,28 +38,29 @@ from .topology import ATOM_TYPES
 
 # ----------------------------------------------------------------------------- per CHARMM19 type
 # name: (Rmin/2 [Å], eps [kcal/mol], V [Å^3], dG_ref, dG_free [kcal/mol], lambda [Å])
+# vdW verified: param19.inp; V, dG_ref, dG_free, lambda verified: OSPREY3 eef1parm.dat (= EEF1 Table I)
 CHARMM19 = {
-    "C":    (2.100, 0.1200, 14.7,   0.000,   0.000, 3.5),
-    "CH1E": (2.365, 0.0486, 23.7,  -0.187,  -0.187, 3.5),
-    "CH2E": (2.235, 0.1142, 22.4,   0.372,   0.372, 3.5),
-    "CH3E": (2.165, 0.1811, 30.0,   1.089,   1.089, 3.5),
-    "CR1E": (2.100, 0.1200, 18.4,   0.057,   0.080, 3.5),
-    "NH1":  (1.600, 0.2384,  4.4,  -5.950,  -5.950, 3.5),
-    "NR":   (1.600, 0.2384,  4.4,  -3.820,  -3.820, 3.5),
-    "NH2":  (1.600, 0.2384, 11.2,  -5.950,  -5.950, 3.5),
-    "NH3":  (1.600, 0.2384, 11.2, -20.000, -20.000, 6.0),
-    "NC2":  (1.600, 0.2384, 11.2, -10.000, -10.000, 6.0),
-    "N":    (1.600, 0.2384,  0.0,  -1.000,  -1.000, 3.5),
-    "OH1":  (1.600, 0.1591, 10.8,  -5.920,  -5.920, 3.5),
-    "O":    (1.600, 0.1591, 10.8,  -5.330,  -5.330, 3.5),
-    "OC":   (1.600, 0.6469, 10.8, -10.000, -10.000, 6.0),
-    "S":    (1.890, 0.0430, 14.7,  -3.240,  -3.240, 3.5),
-    "SH1E": (1.890, 0.0430, 21.4,  -2.050,  -2.050, 3.5),
+    "C":    (2.100, 0.1200, 14.7,   0.000,   0.00, 3.5),
+    "CH1E": (2.365, 0.0486, 23.7,  -0.187,  -0.25, 3.5),
+    "CH2E": (2.235, 0.1142, 22.4,   0.372,   0.52, 3.5),
+    "CH3E": (2.165, 0.1811, 30.0,   1.089,   1.50, 3.5),
+    "CR1E": (2.100, 0.1200, 18.4,   0.057,   0.08, 3.5),
+    "NH1":  (1.600, 0.2384,  4.4,  -5.950,  -8.90, 3.5),
+    "NR":   (1.600, 0.2384,  4.4,  -3.820,  -4.00, 3.5),
+    "NH2":  (1.600, 0.2384, 11.2,  -5.450,  -7.80, 3.5),
+    "NH3":  (1.600, 0.2384, 11.2, -20.000, -20.00, 6.0),
+    "NC2":  (1.600, 0.2384, 11.2, -10.000, -10.00, 6.0),
+    "N":    (1.600, 0.2384,  0.0,  -1.000,  -1.55, 3.5),
+    "OH1":  (1.600, 0.1591, 10.8,  -5.920,  -6.70, 3.5),
+    "O":    (1.600, 0.1591, 10.8,  -5.330,  -5.85, 3.5),
+    "OC":   (1.600, 0.6469, 10.8, -10.000, -10.00, 6.0),
+    "S":    (1.890, 0.0430, 14.7,  -3.240,  -4.10, 3.5),
+    "SH1E": (1.890, 0.0430, 21.4,  -2.050,  -2.70, 3.5),
 }
 # CHARMM19 special 1-4 vdW (Rmin/2, eps) for the extended carbons (param19 "1-4" columns); others unchanged
 LJ14 = {"C": (1.90, 0.1), "CH1E": (1.90, 0.1), "CH2E": (1.90, 0.1), "CH3E": (1.90, 0.1), "CR1E": (1.90, 0.1)}
-# which CHARMM19 values were cross-checked against an external table (PLUMED EEFSolv.cpp, ΔG/λ only)
-DG_VERIFIED = {k for k in CHARMM19 if k != "SH1E"}
+VERIFIED = {k: "vdW: param19.inp; EEF1: OSPREY3 eef1parm.dat (Table I), dG_ref also PLUMED EEFSolv.cpp"
+            for k in CHARMM19}
 
 # PhysDDG type -> (CHARMM19 type, polar?)
 TYPE_MAP = {
@@ -90,7 +93,9 @@ class EnergyParams:
     lj_on: float = 6.0            # attraction switched (CHARMM switch) from lj_on ...
     lj_off: float = 8.0           # ... to 0 at lj_off
     rep_cap: float = 3.0          # repulsion per atom pair becomes linear above this value (backbone flexibility)
-    rep_scale: float = 1.0        # radius scale for the repulsive branch (<1 = softer, FoldX/Rosetta-like)
+    rep_scale: float = 0.9        # radius scale for the repulsive branch. D14 (PI, 10-26): 0.9 = structural
+    #                               calibration only (45c: native chis recognised best; CHARMM19 united-atom radii
+    #                               are ~10% too large for heavy-atom-only crystal contacts); no ΔΔG data used
     w14: float = 0.5              # scale of LJ for 1-4 pairs (3 bonds apart; CHARMM19 1-4 vdW parameters)
     hb_rmin: float = 3.0          # Rmin used for donor-acceptor pairs (implicit polar H, cf. Rosetta)
     # EEF1 solvation

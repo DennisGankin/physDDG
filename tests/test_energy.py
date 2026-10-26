@@ -8,7 +8,7 @@ import torch
 
 from physddg import energy as E
 from physddg import topology as topo
-from physddg.params import CHARMM19, TYPE_MAP, EnergyParams, type_table
+from physddg.params import CHARMM19, LJ14, TYPE_MAP, EnergyParams, type_table
 from physddg.structure import load_protein
 
 DEV = "cuda" if torch.cuda.is_available() else "cpu"
@@ -41,6 +41,38 @@ def test_param_table_complete():
     assert set(TYPE_MAP.values()) and all(c in CHARMM19 for c, _ in TYPE_MAP.values())
     lam = dict(zip(topo.ATOM_TYPES, t[:, 5]))
     assert lam["N_lys"] == 6.0 and lam["O_carboxyl"] == 6.0 and lam["CH3"] == 3.5
+
+
+SRC = Path(__file__).resolve().parents[1] / "data/raw/param_sources"
+
+
+@pytest.mark.skipif(not (SRC / "eef1parm.dat").exists(), reason="run scripts/44_fetch_energy_param_sources.sh")
+def test_params_match_sources():
+    """params.CHARMM19 equals param19.inp (vdW, 1-4) and EEF1 Table I (OSPREY3 eef1parm.dat)."""
+    eef = {}
+    for ln in (SRC / "eef1parm.dat").read_text().splitlines():
+        if ln.strip() and not ln.startswith("%"):
+            t = ln.split()
+            eef[t[0]] = dict(V=float(t[2]), ref=float(t[3]), free=float(t[4]), lam=float(t[7]), R=float(t[8]))
+    nb = {}
+    on = False
+    for ln in (SRC / "param19.inp").read_text().splitlines():
+        if ln.startswith("NONBONDED"):
+            on = True
+        elif on and (ln.startswith("NBFIX") or ln.startswith("HBOND")):
+            break
+        elif on and ln.strip() and not ln.startswith("!") and not ln.startswith(" "):
+            t = ln.split("!")[0].split()
+            nb[t[0]] = [float(x) for x in t[1:]]
+    wild = {"N": "N*", "NH1": "N*", "NR": "N*", "NH2": "N*", "NH3": "N*", "NC2": "N*", "O": "O*", "OH1": "O*",
+            "S": "S*", "SH1E": "S*"}
+    for k, (rh, eps, V, ref, free, lam) in CHARMM19.items():
+        e = eef[k]
+        assert (V, ref, free, lam, rh) == (e["V"], e["ref"], e["free"], e["lam"], e["R"]), k
+        v = nb[wild.get(k, k)]
+        assert (eps, rh) == (-v[1], v[2]), k
+        if k in LJ14:
+            assert LJ14[k] == (v[5], -v[4]), k
 
 
 def test_bonds_consistent_with_e1_internal_coordinates():
@@ -142,7 +174,7 @@ def test_variant_batch_same_as_individual(small):
 # ----------------------------------------------------------------------------- functional forms
 def _two_atom(r, t1="CH3", t2="CH3", cap=None, sep=4):
     """Short-range terms between two isolated atoms of given types at distance r (as slots of two Ala blocks)."""
-    p = EnergyParams() if cap is None else EnergyParams(rep_cap=cap)
+    p = EnergyParams(rep_scale=1.0) if cap is None else EnergyParams(rep_cap=cap, rep_scale=1.0)
     x = torch.full((2, E.A, 3), E.FAR, dtype=torch.float64)
     x[0, 4] = torch.tensor([0.0, 0, 0]); x[1, 4] = torch.tensor([r, 0, 0], dtype=torch.float64)
     f = {"x": x, "m": torch.zeros(2, E.A, dtype=torch.bool)}
@@ -316,3 +348,30 @@ def test_gradients_sidechain_hbonds():
                     with torch.no_grad():
                         num = (energy(xp)[k] - energy(xm)[k]) / (2 * h)
                     assert num.item() == pytest.approx(g[r, a, c].item(), abs=1e-5, rel=1e-4)
+
+
+def test_stat_terms():
+    """StatTerms (torch) reproduces rotlib.PDBStats (numpy) x kT."""
+    from physddg.rotlib import PDBStats
+    st, ref = E.StatTerms(device=DEV), PDBStats()
+    rng = np.random.default_rng(0)
+    phi, psi = rng.uniform(-180, 180, 200), rng.uniform(-180, 180, 200)
+    aa = rng.integers(0, 20, 200)
+    got = st.rama(torch.tensor(aa, device=DEV), torch.tensor(phi, device=DEV), torch.tensor(psi, device=DEV))
+    exp = np.array([ref.rama_energy(topo.AA1[a], np.array([f]), np.array([s]))[0] for a, f, s in zip(aa, phi, psi)])
+    assert np.allclose(got.cpu().numpy(), exp * E.KT, atol=1e-4)
+    nip = rng.random(200) < 0.5
+    got = st.rama(torch.tensor(aa, device=DEV), torch.tensor(phi, device=DEV), torch.tensor(psi, device=DEV),
+                  next_is_pro=torch.tensor(nip, device=DEV)).cpu().numpy()
+    all_ = ref.rama_energy_all_aa(phi, psi, next_is_pro=nip)[np.arange(200), aa]
+    assert np.allclose(got, all_ * E.KT, atol=1e-4)
+    assert np.allclose(st.sc_entropy(torch.arange(20, device=DEV)).cpu().numpy(), ref.sc_entropy() * E.KT, atol=1e-6)
+    cn = rng.uniform(0, 40, 200)
+    ss = rng.integers(0, 3, 200)
+    got = st.env(torch.tensor(aa, device=DEV), torch.tensor(ss, device=DEV), torch.tensor(cn, device=DEV, dtype=torch.float32))
+    exp = ref.env_energy(np.array(list("HEL"))[ss], cn=cn)[np.arange(200), aa]
+    assert np.allclose(got.cpu().numpy(), exp * E.KT, atol=1e-5)
+    # differentiable in phi/psi
+    phi_t = torch.tensor(phi, device=DEV, requires_grad=True)
+    st.rama(torch.tensor(aa, device=DEV), phi_t, torch.tensor(psi, device=DEV)).sum().backward()
+    assert torch.isfinite(phi_t.grad).all()
