@@ -25,3 +25,5 @@ data/work/
 results/competitors/*_domainome.csv
 results/competitors/*_megascale.csv
 results/baselines_ladder/preds_*.parquet
+results/tmol/refit_*_megascale.csv
+results/tmol/refit_*_fireprot.csv
