@@ -108,3 +108,20 @@ def test_stat_features(prot):
     for k, v in sf["per_aa"].items():
         assert v.shape == (len(prot), 20) and np.isfinite(v).all(), k
     assert (sf["per_aa"]["rama_prev"][0] == 0).all()
+
+
+def test_stage2_frozen_env_reverse(prot):
+    """Without neighbours every environment row equals stage-1 F, so reverse = -forward exactly; with neighbours the
+    diagonal (residue in its own relaxed environment) is finite and WT->WT is zero."""
+    sites = np.array([5, 30])
+    s2 = SiteScan(prot, MutateConfig(nb_radius=0.0), DEV).stage2(sites)
+    F = s2["F_env"]
+    assert F.shape == (2, 20, 20) and s2["E_env"].shape[:3] == (2, 20, 20)
+    assert np.allclose(F, F[:, :1, :], atol=1e-5)                     # env rows identical (no flexible residues)
+    w = prot.aa[sites]
+    for k in range(2):
+        fz = F[k, w[k], :] - F[k, w[k], w[k]]
+        rev = np.array([F[k, m, w[k]] - F[k, m, m] for m in range(20)])
+        assert np.allclose(rev, -fz, atol=1e-4)
+    s2n = SiteScan(prot, MutateConfig(), DEV).stage2(sites)
+    assert np.isfinite(s2n["F_env"]).all() and np.isfinite(s2n["E_env"]).all()

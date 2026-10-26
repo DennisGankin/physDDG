@@ -38,10 +38,19 @@ ALL = ["megascale", "fireprot", "s669", "s461", "ssym", "paired_af", "paired_af_
 KEYS = FS.KEYS
 
 
-def cfg_tag(stage: int) -> str:
-    from dataclasses import asdict
+VARIANTS = {  # D9 repulsion-cap settings (file suffix -> MutateConfig overrides); "" = defaults (= capB + soft term)
+    "": {}, "capA": {"cap0": 1.0, "cap1": 0.0}, "capB": {"cap0": 3.0, "cap1": 0.0}, "capC": {"cap0": 1.0, "cap1": 2.0},
+}
+
+
+def make_cfg(variant: str):
     from physddg.mutate import MutateConfig
-    d = asdict(MutateConfig())
+    return MutateConfig(**VARIANTS[variant])
+
+
+def cfg_tag(stage: int, variant: str = "") -> str:
+    from dataclasses import asdict
+    d = asdict(make_cfg(variant))
     d["params"] = {k: v for k, v in d["params"].items() if k != "extra"}
     # energy / geometry sources and statistics tables also define the result (mutate.py is covered by the config)
     src = [ROOT / "physddg" / f for f in ("params.py", "energy.py", "builder.py", "topology.py")]
@@ -80,13 +89,13 @@ def _load(job):
     return structure, p, sites
 
 
-def gpu_worker(gpu: int, jobs: list, stage: int, cdir: str, cpus: int, log: str):
+def gpu_worker(gpu: int, jobs: list, stage: int, cdir: str, cpus: int, log: str, variant: str = ""):
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu)
     import torch
     from concurrent.futures import ProcessPoolExecutor
-    from physddg.mutate import MutateConfig, SiteScan, stat_features
+    from physddg.mutate import SiteScan, stat_features
     torch.backends.cuda.matmul.allow_tf32 = False
-    cfg = MutateConfig()
+    cfg = make_cfg(variant)
     rows = []
     with ProcessPoolExecutor(cpus) as ex:
         for structure, p, sites in ex.map(_load, jobs, chunksize=1):
@@ -117,7 +126,7 @@ def gpu_worker(gpu: int, jobs: list, stage: int, cdir: str, cpus: int, log: str)
     pd.DataFrame(rows).to_csv(log, index=False)
 
 
-def compute(structures: dict, stage: int, cdir: Path, gpus: list[int], cpus: int):
+def compute(structures: dict, stage: int, cdir: Path, gpus: list[int], cpus: int, variant: str = ""):
     import multiprocessing as mp
     todo = [(s, sorted(v)) for s, v in structures.items() if not cache_file(cdir, s).exists()]
     if not todo:
@@ -134,8 +143,8 @@ def compute(structures: dict, stage: int, cdir: Path, gpus: list[int], cpus: int
     rdir.mkdir(parents=True, exist_ok=True)
     procs = []
     for g, part in zip(gpus, parts):
-        log = str(rdir / f"runtime_s{stage}_gpu{g}_{int(time.time())}.csv")
-        pr = ctx.Process(target=gpu_worker, args=(g, part, stage, str(cdir), cpus, log))
+        log = str(rdir / f"runtime_s{stage}{variant}_gpu{g}_{int(time.time())}.csv")
+        pr = ctx.Process(target=gpu_worker, args=(g, part, stage, str(cdir), cpus, log, variant))
         pr.start()
         procs.append(pr)
     for pr in procs:
@@ -192,6 +201,19 @@ def assemble(name: str, rows: pd.DataFrame, stage: int, cdir: Path) -> pd.DataFr
         if "n_rot" in z:
             cols[f"{pre}_nrot_wt"] = z["n_rot"][s_, w_]
             cols[f"{pre}_nrot_mut"] = z["n_rot"][s_, m_]
+        if "F_env" in z:     # stage 2: site scored in frozen mean-field environments (rows: env state, cols: residue)
+            def fz(arr):     # forward wt->mut in the WT-relaxed environment
+                return arr[s_, w_, m_] - arr[s_, w_, w_]
+
+            def rv(arr):     # reverse mut->wt in the modelled mutant environment
+                return arr[s_, m_, w_] - arr[s_, m_, m_]
+            for tag, fn in (("fz", fz), ("rev", rv)):
+                cols[f"{tag}_{pre}_dF"] = fn(z["F_env"])
+                cols[f"{tag}_{pre}_dprior_avg"] = fn(z["prior_env"])
+                cols[f"{tag}_{pre}_dTS"] = kT * fn(z["S_env"])
+                for j, t in enumerate(terms):
+                    cols[f"{tag}_{pre}_dE_{t}"] = fn(z["E_env"][..., j])
+            cols[f"sym_{pre}_dF"] = 0.5 * (cols[f"fz_{pre}_dF"] - cols[f"rev_{pre}_dF"])
         for k in z:
             if k.startswith("stat_"):
                 cols["d_" + k[5:]] = d(z[k])
@@ -245,8 +267,16 @@ def main():
     ap.add_argument("--datasets", nargs="+", default=ALL)
     ap.add_argument("--gpus", nargs="+", type=int, default=[0, 1])
     ap.add_argument("--cpus", type=int, default=12)
+    ap.add_argument("--variants", nargs="+", default=[""], help="repulsion-cap variants: capA capB capC ('' = default)")
+    ap.add_argument("--no-sanity", action="store_true")
     a = ap.parse_args()
-    cdir = FEAT / "cache" / f"phys_s{a.stage}_{cfg_tag(a.stage)}"
+    for v in a.variants:
+        run(a, v)
+
+
+def run(a, variant: str):
+    sfx = f"_{variant}" if variant else ""
+    cdir = FEAT / "cache" / f"phys_s{a.stage}{sfx}_{cfg_tag(a.stage, variant)}"
     cdir.mkdir(parents=True, exist_ok=True)
     rows = {n: dataset_rows(n) for n in a.datasets}
     structures: dict[str, set] = {}
@@ -256,14 +286,15 @@ def main():
     n_sites = sum(len(v) for v in structures.values())
     print(f"stage {a.stage}: {len(structures)} structures, {n_sites} sites, cache {cdir}", flush=True)
     t0 = time.time()
-    compute(structures, a.stage, cdir, a.gpus, a.cpus)
+    compute(structures, a.stage, cdir, a.gpus, a.cpus, variant)
     print(f"compute done in {time.time() - t0:.0f}s", flush=True)
     pre = "s1" if a.stage == 1 else "s2"
     for n, r in rows.items():
         f = assemble(n, r, a.stage, cdir)
-        f.to_parquet(FEAT / f"phys_{pre}_{n}.parquet", index=False)
+        f.to_parquet(FEAT / f"phys_{pre}_{n}{sfx}.parquet", index=False)
         print(f"{n:15s} rows {len(f):7d} site_found {f.site_found.mean():.4f} wt_match {f.wt_match.mean():.4f}", flush=True)
-    sanity(a.stage)
+    if not a.no_sanity and not variant:
+        sanity(a.stage)
 
 
 if __name__ == "__main__":

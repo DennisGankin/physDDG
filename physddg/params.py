@@ -96,6 +96,8 @@ class EnergyParams:
     rep_scale: float = 0.9        # radius scale for the repulsive branch. D14 (PI, 10-26): 0.9 = structural
     #                               calibration only (45c: native chis recognised best; CHARMM19 united-atom radii
     #                               are ~10% too large for heavy-atom-only crystal contacts); no ΔΔG data used
+    rep_soft: float = 0.0         # > 0 adds term lj_rep_soft = s*log1p(raw/s) per atom pair (raw = uncapped repulsive
+                                  # branch eps((Rr/r)^6-1)^2, log-saturating; s in kcal/mol). Default off (E1, D9 variants)
     w14: float = 0.5              # scale of LJ for 1-4 pairs (3 bonds apart; CHARMM19 1-4 vdW parameters)
     hb_rmin: float = 3.0          # Rmin used for donor-acceptor pairs (implicit polar H, cf. Rosetta)
     # EEF1 solvation

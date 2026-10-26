@@ -55,7 +55,8 @@ C_IDX = topo.AA_INDEX["C"]
 
 def term_names(p: EnergyParams | None = None) -> tuple[str, ...]:
     p = p or EnergyParams()
-    return SR_TERMS + tuple(f"elec_{m}" for m in p.elec_modes) + ("disulf",)
+    soft = ("lj_rep_soft",) if p.rep_soft > 0 else ()
+    return SR_TERMS + soft + tuple(f"elec_{m}" for m in p.elec_modes) + ("disulf",)
 
 
 # ============================================================================= template tables
@@ -366,7 +367,7 @@ def _width(m: torch.Tensor) -> int:
 def _core(fa: dict, fb: dict, sep: torch.Tensor, nonadj: torch.Tensor, p: EnergyParams) -> torch.Tensor:
     """Short-range terms summed over slot pairs. fa/fb fields [..., A, *] (broadcastable leading dims),
     sep [..., A, A] separation codes, nonadj [...] bool (|i-j| >= 2, enables backbone-backbone H-bonds).
-    Returns [..., len(SR_TERMS)]."""
+    Returns [..., len(SR_TERMS) (+1 if p.rep_soft > 0: lj_rep_soft)]."""
     ea = lambda k: fa[k][..., :, None]          # [..., A, 1]
     eb = lambda k: fb[k][..., None, :]          # [..., 1, A]
     d = fb["x"][..., None, :, :] - fa["x"][..., :, None, :]          # [..., A, A, 3], a -> b
@@ -428,7 +429,12 @@ def _core(fa: dict, fb: dict, sep: torch.Tensor, nonadj: torch.Tensor, p: Energy
     out = torch.stack([(atr * w).sum((-1, -2)), (rep * w).sum((-1, -2)), solv_apolar.sum((-1, -2)),
                        solv_polar.sum((-1, -2)), hb_scbb.sum((-1, -2)), hb_scsc.sum((-1, -2))], -1)
     shape = out.shape[:-1]
-    return torch.cat([out, hb_bb.expand(shape)[..., None]], -1)
+    out = torch.cat([out, hb_bb.expand(shape)[..., None]], -1)
+    if p.rep_soft > 0:     # log-saturating repulsion on the uncapped branch (extra feature term, after hb_bb_bb)
+        raw = torch.where(r2 < rr2, eps * ((rr2 / r2.clamp(min=0.01)) ** 3 - 1) ** 2, torch.zeros_like(r2))
+        soft = p.rep_soft * torch.log1p(raw / p.rep_soft)
+        out = torch.cat([out, (soft * w).sum((-1, -2))[..., None]], -1)
+    return out
 
 
 def _eef1(fa: dict, fb: dict, r2: torch.Tensor, near: torch.Tensor, p: EnergyParams):

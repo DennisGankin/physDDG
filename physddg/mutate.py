@@ -19,7 +19,9 @@ mean-field-averaged per-term energies. WT-WT neighbour tables (candidate vs nati
 computed once per protein and shared by all sites.
 
 CB: native CB kept for all targets when WT is not Gly (Pro<->X: ideal CB of the target, Pro CB geometry differs);
-WT Gly -> ideal CB. Repulsion: rep_scale 0.9 (D14); per-residue cap = cap0 + cap1 * (1 - burial) (D9).
+WT Gly -> ideal CB. Repulsion: rep_scale 0.9 (D14); per-residue cap = cap0 + cap1 * rigidity (D9; rigidity =
+normalised smooth contact number or a per-residue array, e.g. from pLDDT); optional extra log-saturating repulsion
+feature term lj_rep_soft (cfg.rep_soft, not part of the packing energy U).
 """
 from __future__ import annotations
 
@@ -46,8 +48,11 @@ class MutateConfig:
     max_rot: int = 30                    # ... capped at max_rot per residue type
     expand: bool = False                 # +-1 sd chi1/chi2 expansion of site rotamers (x3 / x9)
     rep_scale: float = 0.9               # D14
-    cap0: float = 3.0                    # repulsion cap per atom pair (kcal/mol) ...
-    cap1: float = 0.0                    # ... + cap1 * (1 - burial)  (D9 site-dependent cap)
+    cap0: float = 3.0                    # repulsion cap per atom pair (kcal/mol): cap(res) = cap0 + cap1 * rigidity(res)
+    cap1: float = 0.0                    # (D9). rigidity in [0,1]: normalised smooth CB contact number (default) or a
+    cn_lo: float = 8.0                   # per-residue array passed to SiteScan (AF hook, e.g. pLDDT/100);
+    cn_hi: float = 24.0                  # rigidity = clip((cn - cn_lo) / (cn_hi - cn_lo), 0, 1); pair cap = max of both
+    rep_soft: float = 1.0                # > 0: extra feature term lj_rep_soft = s*log1p(raw/s) per pair (not in U)
     pack_terms: tuple = ("lj_atr", "lj_rep", "solv_apolar", "solv_polar", "hb_sc_bb", "hb_sc_sc", "hb_bb_bb",
                          "elec_dh", "disulf")
     # stage 2
@@ -63,7 +68,7 @@ class MutateConfig:
     params: EnergyParams = field(default_factory=lambda: EnergyParams(rep_scale=0.9))
 
     def __post_init__(self):
-        self.params = replace(self.params, rep_scale=self.rep_scale)
+        self.params = replace(self.params, rep_scale=self.rep_scale, rep_soft=self.rep_soft)
 
 
 _LIB: RotamerLibrary | None = None
@@ -92,20 +97,25 @@ def _sync(dev):
 class SiteScan:
     """All-20-aa site evaluation for one protein (structure.Protein, annotated)."""
 
-    def __init__(self, prot, cfg: MutateConfig | None = None, device="cuda"):
+    def __init__(self, prot, cfg: MutateConfig | None = None, device="cuda", rigidity: np.ndarray | None = None):
+        """rigidity: optional per-residue array in [0, 1] for the site-dependent repulsion cap (D9 hook; default:
+        normalised smooth CB contact number from prot.ann['cn'])."""
         self.prot, self.cfg, self.dev = prot, cfg or MutateConfig(), torch.device(device)
         p = self.cfg.params
         self.terms = E.term_names(p)
         self.pack_idx = torch.tensor([self.terms.index(t) for t in self.cfg.pack_terms], device=self.dev)
         b = E.blocks_from_protein(prot, self.dev, p)
-        b.cap = self.cfg.cap0 + self.cfg.cap1 * (1.0 - b.burial)
+        if "phi" not in prot.ann:
+            from .structure import annotate
+            annotate(prot, do_sasa=False)
+        if rigidity is None:
+            rigidity = np.clip((prot.ann["cn"] - self.cfg.cn_lo) / (self.cfg.cn_hi - self.cfg.cn_lo), 0.0, 1.0)
+        self.rigidity = np.asarray(rigidity, np.float32)
+        b.cap = self.cfg.cap0 + self.cfg.cap1 * torch.as_tensor(self.rigidity, device=self.dev)
         self.blocks = b
         self.L = len(prot)
         with torch.no_grad():
             self.env = E.make_env(b, None, p)
-        if "phi" not in prot.ann:
-            from .structure import annotate
-            annotate(prot, do_sasa=False)
         self.phi, self.psi = prot.ann["phi"], prot.ann["psi"]
         self.bb = torch.tensor(np.nan_to_num(prot.xyz14[:, :4]), device=self.dev, dtype=torch.float32)
         self.timing: dict[str, float] = {}
@@ -399,7 +409,7 @@ class SiteScan:
         self.timing["stage2_tables"] = time.time() - t0
         # pass 2: per site chunk, site one-body + site-neighbour pairs + mean field
         res = {k: [] for k in ("F", "E_avg", "S_local", "prior_avg", "n_rot", "n_nb", "chi_best", "ref",
-                               "nb_native_frac")}
+                               "nb_native_frac", "F_env", "E_env", "prior_env", "S_env")}
         for ss, cand, nl in chunks:
             red = self._stage2_chunk(ss, cand, nl, NC, jpos, PN, pn_id, PP, pp_id)
             for k in res:
@@ -499,8 +509,20 @@ class SiteScan:
         nn = torch.as_tensor([len(n) for n in nl], device=dev).float()[sb]
         kmask = torch.arange(K, device=dev)[None] < nn[:, None]
         nb_frac = torch.where(nn > 0, (nb_nat * kmask).sum(-1) / nn.clamp(min=1), torch.full_like(nn, float("nan")))
+        # site scored in every (site, aa_env) mean-field environment: rows = environment state (neighbour distributions
+        # relaxed around aa_env), columns = residue type placed at the site; reverse scoring mut->wt on the modelled
+        # mutant environment = X[s, mut, wt] - X[s, mut, mut]
+        qe = qjz.view(S, 20, K, Cmax)
+        f0 = U0.view(S, 1, 20, R) + torch.einsum("sekc,sarkc->sear", qe, Wsn.view(S, 20, R, K, Cmax))
+        logZ = torch.logsumexp(-f0 / kT, -1)                                            # [S, E, A]
+        w = torch.exp(-f0 / kT - logZ[..., None])
+        e_site = H0.view(S, 1, 20, R, nT) + torch.einsum("sekc,sarkct->seart", qe, ESN.view(S, 20, R, K, Cmax, nT))
+        env_out = {"F_env": (-kT * logZ).cpu().numpy(),
+                   "E_env": torch.einsum("sear,seart->seat", w, e_site).cpu().numpy(),
+                   "prior_env": (w * P0.view(S, 1, 20, R)).sum(-1).cpu().numpy(),
+                   "S_env": (-xlogx(w).sum(-1)).cpu().numpy()}
         v = lambda x: x.view(S, 20, *x.shape[1:]).cpu().numpy()
-        return {"F": v(F), "E_avg": v(E_avg), "S_local": v(ent), "prior_avg": v(prior_avg),
+        return {**env_out, "F": v(F), "E_avg": v(E_avg), "S_local": v(ent), "prior_avg": v(prior_avg),
                 "n_rot": counts.view(S, 20).cpu().numpy(), "n_nb": np.array([len(n) for n in nl]),
                 "chi_best": chi_best, "ref": self._ref(mov, cand, S), "nb_native_frac": v(nb_frac)}
 
