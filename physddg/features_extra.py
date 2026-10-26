@@ -120,7 +120,8 @@ def _segments(mask):
     return out
 
 
-def site_descriptors(path: str) -> pd.DataFrame:
+def _site_descriptors_v1(path: str) -> pd.DataFrame:
+    """Original loop implementation (fitting lead); kept as the reference for tests/test_features_extra.py."""
     p = S.annotate(S.load_protein(path, keep_het=False))
     L = len(p)
     a = p.ann
@@ -293,6 +294,210 @@ def site_descriptors(path: str) -> pd.DataFrame:
                 if j != i and np.linalg.norm(cats[i] - c) < 6.0:
                     v = (cats[i] - c) / np.linalg.norm(cats[i] - c)
                     catpi[i] += 1.0 if abs(float(v @ nrm)) > 0.7 else 0.5
+    out.update(n_aro6=aro6, n_aro8=aro8, aro_stack=stack, catpi=catpi)
+    # backbone
+    phi, psi = np.nan_to_num(a["phi"], nan=-180.0), np.nan_to_num(a["psi"], nan=180.0)
+    out.update(phi=phi, psi=psi, basin=_basin(phi, psi))
+    om = a.get("omega")
+    out["cis_prev"] = (np.abs(np.nan_to_num(om, nan=180.0)) < 30).astype(int) if om is not None else np.zeros(L, int)
+    # domain-level
+    out.update(L=np.full(L, L), frac_helix=np.full(L, float(np.mean(ss3 == "H"))),
+               frac_strand=np.full(L, float(np.mean(ss3 == "E"))), mean_plddt=np.full(L, float(b.mean())))
+    d = pd.DataFrame(out)
+    d.insert(0, "structure_abs", str(path))
+    return d
+
+
+def _pairs_within(tree_a, tree_b, r: float):
+    """All (i, j) with |a_i - b_j| <= r (query_ball_point semantics), as index arrays."""
+    lists = tree_a.query_ball_tree(tree_b, r)
+    n = np.fromiter((len(v) for v in lists), int, len(lists))
+    i = np.repeat(np.arange(len(lists)), n)
+    j = np.fromiter((x for v in lists for x in v), int, int(n.sum()))
+    return i, j
+
+
+def site_descriptors(path: str) -> pd.DataFrame:
+    """Per-residue site descriptors (see module docstring). Vectorised version (2026-10-26, E1) of
+    `_site_descriptors_v1`, identical values (tests/test_features_extra.py)."""
+    p = S.annotate(S.load_protein(path, keep_het=False))
+    L = len(p)
+    a = p.ann
+    at = p.atoms()
+    ri, nm, xyz = at["res_index"], at["name"], at["xyz"].astype(np.float64)
+    elem = np.array([n[0] for n in nm])
+    is_sc = ~np.isin(nm, ["N", "CA", "C", "O", "OXT"])
+    polar = np.isin(elem, ["N", "O"])
+    tree = cKDTree(xyz)
+    cb = S.cb_coords(p).astype(np.float64)
+    sc = np.where(p.mask14[:, 4:, None], p.xyz14[:, 4:], 0.0).astype(np.float64)
+    cnt = p.mask14[:, 4:].sum(1, keepdims=True)
+    cen = np.where(cnt > 0, sc.sum(1) / np.maximum(cnt, 1), p.xyz14[:, 1])
+    out = {"pdb_resnum": p.resnum, "chain": p.chain, "aa_struct": list(p.seq)}
+    # burial
+    tcb = cKDTree(cb)
+    for r in (6, 8, 10, 12, 14):
+        out[f"ncb{r}"] = tcb.query_ball_point(cb, r, return_length=True) - 1
+    tcen = cKDTree(cen)
+    for r in (8, 10, 12):
+        out[f"ncen{r}"] = tcen.query_ball_point(cen, r, return_length=True) - 1
+    out["hse_up"], out["hse_down"], out["cn"] = a["hse_up"], a["hse_down"], a["cn"]
+    out["rsa"] = np.clip(a["rsa"], 0, 1.5)
+    out["sasa_sc"] = a["sasa_sc"]
+    # packing / contacts / H-bonds
+    for r, key in ((6, "natom6"), (8, "natom8")):
+        i, j = _pairs_within(tcen, tree, r)
+        keep = ri[j] != i
+        out[key] = np.bincount(i[keep], minlength=L).astype(float)
+    k, j = _pairs_within(tree, tree, 4.5)                         # atom-atom pairs within 4.5 A
+    m = is_sc[k] & is_sc[j] & (ri[k] != ri[j])
+    rk, jj, rj = ri[k[m]], j[m], ri[j[m]]
+    u = np.unique(rk * len(xyz) + jj)                             # distinct partner atoms per residue
+    scsc = np.bincount(u // len(xyz), minlength=L).astype(float)
+    ur = np.unique(rk * L + rj)
+    scres = np.bincount(ur // L, minlength=L).astype(float)
+    has_sc = np.bincount(ri[is_sc], minlength=L) > 0
+    k, j = _pairs_within(tree, tree, 3.5)
+    m = is_sc[k] & polar[k] & polar[j] & (ri[k] != ri[j])
+    u = np.unique(ri[k[m]] * len(xyz) + j[m])
+    res_u, atom_u = u // len(xyz), u % len(xyz)
+    hb_any = np.bincount(res_u, minlength=L).astype(float)
+    hb_bb = np.bincount(res_u[~is_sc[atom_u]], minlength=L).astype(float)
+    hb_sc = np.bincount(res_u[is_sc[atom_u]], minlength=L).astype(float)
+    for arr in (scsc, scres, hb_any, hb_bb, hb_sc):
+        arr[~has_sc] = 0.0
+    out.update(natom6=out.pop("natom6"), natom8=out.pop("natom8"), scsc_contacts=scsc, scsc_res=scres,
+               hb_sc_any=hb_any, hb_sc_bb=hb_bb, hb_sc_sc=hb_sc)
+    # void fraction (same grid / criteria as v1, all residues in one batched query)
+    g = np.mgrid[-5:5.01:1.0, -5:5.01:1.0, -5:5.01:1.0].reshape(3, -1).T
+    g = g[np.linalg.norm(g, axis=1) <= 5.0]
+    rad = np.array([VDW.get(e, 1.7) for e in elem])
+    pts = (cen[:, None, :] + g[None]).reshape(-1, 3)
+    # v1: empty = all of the 8 nearest atoms farther than vdW + 0.5. Exact shortcut via the nearest atom: if it is
+    # within min(vdW)+0.5 the point is occupied, beyond max(vdW)+0.5 all 8 nearest pass; only the band in between
+    # needs the 8-neighbour test. The (expensive) 10 A density count is only needed where the point is empty.
+    lo, hi = rad.min() + 0.5, rad.max() + 0.5
+    d1, _ = tree.query(pts, k=1)
+    empty = d1 > hi
+    amb = np.flatnonzero((d1 > lo) & ~empty)
+    if len(amb):
+        d, jn = tree.query(pts[amb], k=8)
+        empty[amb] = np.all(d > rad[jn] + 0.5, axis=1)
+    void = np.zeros(len(pts), bool)
+    e = np.flatnonzero(empty)
+    if len(e):
+        void[e] = tree.query_ball_point(pts[e], 10.0, return_length=True) >= 55
+    out["void_frac"] = void.reshape(L, len(g)).mean(1).astype(float)
+    # backbone H-bonds (DSSP)
+    from .features_simple import _nh_hbond
+    out["hb_bb_nh"] = _nh_hbond(p).astype(int)
+    # secondary-structure position (cheap loops over segments, unchanged)
+    ss8, ss3 = a["ss8"], a["ss3"]
+    out["ss8"], out["ss3"] = ss8, ss3
+    hx = ss8 == "H"
+    f = {k_: np.zeros(L) for k_ in ("ncap", "n1", "n2", "n3", "c1", "c2", "c3", "ccap", "helix_int", "helix_len",
+                                    "helix_pos", "strand_edge", "strand_centre", "strand_len", "loop_len")}
+    for s0, e0 in _segments(hx):
+        n = e0 - s0 + 1
+        if s0 - 1 >= 0:
+            f["ncap"][s0 - 1] = 1
+        if e0 + 1 < L:
+            f["ccap"][e0 + 1] = 1
+        for kk in range(3):
+            if s0 + kk <= e0:
+                f[f"n{kk + 1}"][s0 + kk] = 1
+            if e0 - kk >= s0:
+                f[f"c{kk + 1}"][e0 - kk] = 1
+        ii = np.arange(s0, e0 + 1)
+        f["helix_len"][ii] = n
+        f["helix_pos"][ii] = (ii - s0) / max(n - 1, 1)
+        f["helix_int"][ii] = ((ii - s0 >= 3) & (e0 - ii >= 3)).astype(float)
+    st = ss3 == "E"
+    segs = _segments(st)
+    seg_id = np.full(L, -1)
+    for kk, (s0, e0) in enumerate(segs):
+        seg_id[s0:e0 + 1] = kk
+        f["strand_len"][s0:e0 + 1] = e0 - s0 + 1
+    ca = p.xyz14[:, 1].astype(np.float64)
+    tca = cKDTree(ca)
+    for i in np.flatnonzero(st):
+        part = {seg_id[j] for j in tca.query_ball_point(ca[i], 5.5) if st[j] and seg_id[j] != seg_id[i] and abs(j - i) > 2}
+        f["strand_centre" if len(part) >= 2 else "strand_edge"][i] = 1
+    for s0, e0 in _segments(ss3 == "L"):
+        f["loop_len"][s0:e0 + 1] = e0 - s0 + 1
+    out.update(f)
+    # termini (chain-wise)
+    idx = np.arange(L)
+    dn = np.zeros(L); dc = np.zeros(L)
+    for ch in np.unique(p.chain):
+        mm = np.flatnonzero(p.chain == ch)
+        dn[mm] = idx[mm] - mm[0]; dc[mm] = mm[-1] - idx[mm]
+    out.update(dist_nterm=dn, dist_cterm=dc, dist_term=np.minimum(dn, dc), rel_pos=dn / np.maximum(dn + dc, 1),
+               term3=(np.minimum(dn, dc) < 3).astype(int), term6=(np.minimum(dn, dc) < 6).astype(int))
+    # pLDDT / B: +-3 window over the residue array (as v1)
+    b = p.bfactor.astype(np.float64)
+    pad_n = np.r_[np.full(3, np.nan), b, np.full(3, np.nan)]
+    w = np.lib.stride_tricks.sliding_window_view(pad_n, 7)
+    win = np.array([x[~np.isnan(x)].mean() for x in w]) if L < 50 else np.nanmean(w, axis=1)
+    wmin = np.nanmin(w, axis=1)
+    out.update(plddt=b, plddt_win=win, plddt_min_win=wmin, plddt_z=(b - b.mean()) / (b.std() + 1e-6))
+    # charges
+    qres, qcen, qval, qat_res, qat_xyz = [], [], [], [], []
+    for i in range(L):
+        aa = p.seq[i]
+        if aa in CHG_ATOMS:
+            pts_ = [x for x in (_atom(p, i, n_) for n_ in CHG_ATOMS[aa]) if x is not None]
+            if pts_:
+                qres.append(i); qcen.append(np.mean(pts_, 0)); qval.append(CHARGE[aa])
+                qat_res += [len(qres) - 1] * len(pts_); qat_xyz += pts_
+    q_site = np.array([CHARGE.get(x, 0) for x in p.seq], float)
+    q8, q12, npos6, nneg6, sbp, same6 = (np.zeros(L) for _ in range(6))
+    if qres:
+        qres, qval = np.array(qres), np.array(qval, float)
+        qcen = np.array(qcen)
+        dq = np.linalg.norm(qcen[None] - cen[:, None], axis=-1)             # [L, M]
+        other = qres[None] != np.arange(L)[:, None]
+        q8 = ((dq < 8) & other) @ qval
+        q12 = ((dq < 12) & other) @ qval
+        near6 = (dq < 6) & other
+        npos6 = (near6 & (qval > 0)[None]).sum(1).astype(float)
+        nneg6 = (near6 & (qval < 0)[None]).sum(1).astype(float)
+        same6 = ((near6 & (np.sign(qval)[None] == np.sign(q_site)[:, None])) & (q_site != 0)[:, None]).sum(1).astype(float)
+        qat_res, qat_xyz = np.array(qat_res), np.array(qat_xyz, np.float64)
+        dd = np.linalg.norm(qat_xyz[:, None] - qat_xyz[None], axis=-1)
+        M = len(qres)
+        mind = np.full((M, M), np.inf)
+        np.minimum.at(mind, (qat_res[:, None].repeat(len(qat_res), 1), qat_res[None].repeat(len(qat_res), 0)), dd)
+        opp = (qval[:, None] * qval[None] < 0) & (mind < 4.0)
+        np.fill_diagonal(opp, False)
+        np.add.at(sbp, qres, opp.sum(1).astype(float))
+    out.update(q_site=q_site, q_env8=q8, q_env12=q12, n_pos6=npos6, n_neg6=nneg6, sb_partners=sbp, same_q6=same6)
+    # aromatics / cation-pi
+    rings = {i: _ring(p, i) for i in range(L) if p.seq[i] in AROMATIC}
+    rings = {i: v for i, v in rings.items() if v[0] is not None}
+    cats = {i: _atom(p, i, CATION_ATOM[p.seq[i]]) for i in range(L) if p.seq[i] in CATION_ATOM}
+    cats = {i: v for i, v in cats.items() if v is not None}
+    aro6, aro8, stack, catpi = (np.zeros(L) for _ in range(4))
+    if rings:
+        rj = np.array(list(rings)); rc = np.array([v[0] for v in rings.values()]); rn = np.array([v[1] for v in rings.values()])
+        dr = np.linalg.norm(rc[None] - cen[:, None], axis=-1)
+        other = rj[None] != np.arange(L)[:, None]
+        aro6 = ((dr < 6.5) & other).sum(1).astype(float)
+        aro8 = ((dr < 8) & other).sum(1).astype(float)
+        drr = np.linalg.norm(rc[:, None] - rc[None], axis=-1)
+        sw = np.abs(rn @ rn.T) * 0.5 + 0.5
+        okr = (drr < 7.0) & ~np.eye(len(rj), dtype=bool)
+        stack[rj] = np.where(okr, sw, 0.0).sum(1)
+        if cats:
+            cj = np.array(list(cats)); cx = np.array(list(cats.values()), np.float64)
+            v = cx[None] - rc[:, None]                                     # [R, C] ring centre -> cation
+            dv = np.linalg.norm(v, axis=-1)
+            cosn = np.abs(np.einsum("rcx,rx->rc", v / np.where(dv > 0, dv, 1.0)[..., None], rn))
+            wgt = np.where(cosn > 0.7, 1.0, 0.5)
+            okc = (dv < 6.0) & (rj[:, None] != cj[None])
+            catpi_r = np.where(okc, wgt, 0.0)
+            np.add.at(catpi, rj, catpi_r.sum(1))
+            np.add.at(catpi, cj, catpi_r.sum(0))
     out.update(n_aro6=aro6, n_aro8=aro8, aro_stack=stack, catpi=catpi)
     # backbone
     phi, psi = np.nan_to_num(a["phi"], nan=-180.0), np.nan_to_num(a["psi"], nan=180.0)
