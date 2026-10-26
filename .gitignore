@@ -7,3 +7,7 @@ data/cache/
 results/**/*.npz
 results/**/cache/
 results/baselines/*.csv
+# data-AF (regenerable)
+data/structures/
+data/processed/domainome.csv
+data/processed/domainome.parquet
