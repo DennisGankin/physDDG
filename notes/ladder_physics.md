@@ -102,7 +102,130 @@ at inference on a single structure. The other columns are single-structure score
 
 
 
+## D19 final models: B6g / B6gs1 / B6gaf (fourth issue)
+
+**Decision D19.** The shipped default must generalise across assays, so it drops both WT-site main effects:
+`site_hbsc_bur` (fails G6, scaled ratio 0.25) and `site_scsc` (hurts FireProt/S669/S461, G6 edge at 0.35).
+**B6g = B5 + `ncap_pref` + `helix_dipole`** (stage 2), **B6gs1** the stage-1 analogue (default fast mode),
+**B6gaf** = B6g + AF-only pLDDT attenuation. `B6x` = B6g + `site_scsc` is kept in the tables for transparency.
+Both B6g terms are state-function differences (D15-compliant).
+
+> **Selection-optimism caveat (D19.4).** The B6 term set was chosen *after* the residual analysis had taken one
+> look at the test sets (`notes/residual_analysis.md` §4). Selection itself used only train CV and val, but the
+> decision to pursue these terms at all was informed by that look. **Read B5 → B6g/B6x test deltas as mildly
+> optimistic.** The val/CV deltas below are the cleaner evidence, and they are smaller than the test deltas for
+> `site_scsc` — which is part of why D19 drops it.
+
+### Selection (`final_selection_ablation.csv`; Megascale-val natural ρ_prot / grouped-CV natural ρ_prot)
+| model | val | CV | test natural (reported, not used for any choice) |
+|---|---|---|---|
+| B4 (stage-1 base) | 0.7265 | 0.6709 | 0.6768 |
+| **B6gs1** | 0.7262 | 0.6758 | 0.6784 |
+| B6xs1 (+site_scsc) | 0.7326 | 0.6896 | 0.6903 |
+| B5 (stage-2 base) | 0.7329 | 0.6727 | 0.6866 |
+| **B6g** | 0.7411 | 0.6813 | 0.6919 |
+| B6x (+site_scsc) | 0.7434 | 0.6944 | 0.7005 |
+| 4-term set − site_scsc (i.e. +hbsc, ncap, dipole) | 0.7391 | 0.6909 | 0.6934 |
+| **B6gaf** (B6g + pLDDT attenuation) | **0.7439** | **0.6900** | 0.6988 |
+| B6g + burial attenuation (control, constrained) | 0.7411 | 0.6813 | 0.6919 |
+
+The PI's quoted "val 0.739 / CV 0.691" is the **4-term-minus-scsc** row (it still contains `site_hbsc_bur`).
+B6g proper — N-cap and dipole only — is **val 0.7411 / CV 0.6813**: better on val, lower on CV, because
+`site_hbsc_bur` is a CV-only term (that is exactly how it was described in the residual analysis, and why G6
+could reject it without much loss). Confirmed.
+
+**Attenuation control survives without site_scsc.** Sign-constrained, the burial version is pinned at 0 and
+changes nothing; refitted sign-free it takes **+0.82** — it wants to amplify buried predictions, not attenuate —
+while the pLDDT weight stays at −0.97. So B6gaf is kept: it is not the burial proxy that `notes/af_mode.md` §4
+rejected. Its gain is small and its weight CI includes 0.
+
+### Final results (D17 protocol: identical rows, strict-only S461/S669, FoldX raw and clipped)
+| model | MS nat ρ_prot | MS nat-strict | MS all ρ_prot | MS all r | MS RMSE | FP r (338) | S669-str | S461-str | Dom ρ_dom | Dom flag-kept | Abund ρ |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| B5 | 0.687 | 0.697 | 0.685 | 0.686 | 0.776 | 0.467 | 0.315 | 0.556 | 0.412 | 0.440 | 0.469 |
+| **B6gs1** (fast) | 0.678 | 0.690 | 0.684 | 0.681 | 0.780 | 0.455 | 0.328 | 0.569 | 0.414 | — | 0.468 |
+| **B6g** (default) | 0.692 | 0.702 | 0.692 | 0.687 | 0.776 | 0.464 | 0.316 | 0.549 | 0.418 | 0.449 | 0.469 |
+| **B6gaf** (AF only) | 0.699 | 0.704 | 0.699 | 0.690 | 0.768 | 0.464 | 0.316 | 0.549 | 0.425 | 0.454 | 0.478 |
+| B6x (+site_scsc) | 0.701 | 0.705 | 0.695 | 0.692 | 0.770 | 0.439 | 0.291 | 0.545 | 0.437 | 0.471 | 0.472 |
+| FoldX raw / clipped | 0.629 | 0.640 | 0.633 | 0.447 / 0.590 | 3.17 / 1.84 | 0.417 / 0.423 | – | – | 0.430 | 0.458 | – |
+| tmol-refit | 0.622 | 0.637 | 0.626 | 0.629 | 0.822 | 0.486 | – | – | – | – | – |
+FireProt on all 347 rows: B5 0.456, B6g 0.451, B6gs1 0.444, B6x 0.430, FoldX 0.411, tmol-refit 0.477.
+
+**Paired bootstrap** (identical rows, 95% cluster CI):
+| comparison | MS natural ρ_prot | MS nat-strict | MS all | Pearson (natural) |
+|---|---|---|---|---|
+| B6g − B5 | +0.005 [−0.004, +0.019] | +0.004 [−0.007, +0.009] | +0.006 [−0.005, +0.019] | +0.001 [−0.002, +0.003] |
+| B6gaf − B5 | +0.012 [+0.000, +0.027] | +0.006 [−0.001, +0.012] | +0.013 [+0.001, +0.026] | +0.003 [−0.006, +0.013] |
+| B6gs1 − B5 | −0.008 [−0.011, +0.006] | −0.007 [−0.027, +0.006] | −0.001 [−0.020, +0.010] | −0.004 [−0.009, +0.002] |
+| B6g − FoldX | +0.063 [+0.008, +0.120] | +0.062 [+0.009, +0.125] | +0.058 [+0.017, +0.121] | +0.256 [+0.200, +0.300] |
+| B6g − FoldX-clip | +0.063 [+0.008, +0.120] | +0.062 [+0.009, +0.125] | +0.058 [+0.016, +0.121] | **+0.105 [+0.068, +0.135]** |
+| Domainome B6g − B5 | +0.007 [−0.000, +0.014] (flag-kept +0.011 [+0.000, +0.017]) | | | |
+| Domainome B6g − FoldX | −0.012 [−0.038, +0.019] (flag-kept −0.009 [−0.028, +0.015]) | | | |
+| FireProt B6g − B5 | Pearson −0.005 [−0.011, −0.000] | | | |
+
+**Honest reading.** Removing `site_scsc` removes most of the Megascale/Domainome test gain: B6g − B5 is
++0.005 [−0.004, +0.019] on the primary subset, i.e. **not distinguishable from B5**. What D19 buys is that B6g
+no longer *loses* on the crystal sets (FireProt 0.464 vs B6x 0.439; S669-strict 0.316 vs 0.291) while keeping a
+small, well-transferring improvement. B6gaf is the only variant with a CI excluding 0 against B5 (+0.012), and
+only on AF-type inputs. **Against FoldX the margin is unchanged and significant on all three Megascale subsets**
+(+0.058 to +0.063 rank, +0.105 Pearson over clipped FoldX, RMSE 0.776 vs 1.84), which is the claim that matters.
+Note B6gs1 is *below* B5 on Megascale natural (−0.008): at stage 1 the two new terms do not pay for themselves,
+so the fast mode is "B4 + N-cap + dipole", not a free upgrade.
+
+### What contributes (drop-one-group from B6g, stage 2; val / CV / test natural ρ_prot)
+| dropped | Δval | ΔCV | Δtest |
+|---|---|---|---|
+| B3+ remainder (burial, cavity, Pro/Gly, SS-broken) | −0.080 | −0.047 | −0.036 |
+| all engine energies (8 terms) | −0.040 | −0.032 | −0.038 |
+| reference energies (Δref, 20) | −0.027 | −0.022 | −0.008 |
+| vdW (lj_atr + lj_rep) | −0.024 | −0.011 | −0.015 |
+| solvation (apolar + polar) | −0.024 | +0.003 | −0.006 |
+| H-bonds (sc-bb, sc-sc, bb-bb) | −0.022 | −0.009 | −0.008 |
+| env statistical potential | −0.018 | −0.006 | −0.006 |
+| Ramachandran (site + pre-Pro) | −0.015 | −0.010 | −0.009 |
+| electrostatics | −0.011 | −0.007 | +0.003 |
+| side-chain entropy + rotamer prior | −0.006 | −0.005 | −0.007 |
+| N-cap | −0.008 | −0.009 | −0.004 |
+| helix dipole | +0.001 | −0.001 | −0.000 |
+| stage 2 → stage 1 (B6g → B6gs1) | −0.015 | −0.006 | −0.014 |
+
+Reading: the structure-derived scalar terms (burial, cavity, Pro/Gly indicators) and the engine energies are each
+worth 3–8 points of per-protein ρ, the reference energies 2–3, and every individual energy group 1–2. The two new
+D19 terms are worth ~1 point (N-cap) and ~0 (dipole, kept because it is physically standard, free and transfers).
+No single group dominates: this is a model where ~6 groups each contribute a little.
+
+### G6 transfer of the final term set (`transfer_B6g.csv`, `transfer_B6gs1.csv`)
+**All 20 B6g weights pass**: no sign flips (in constrained or sign-free refits), every scaled ratio in 0.67–1.87,
+reference energies correlate r = 0.75. `ncap_pref` 0.294 ± 0.037 vs 0.465 ± 0.120 (scaled ratio 0.93) and
+`helix_dipole` 0.086 ± 0.021 vs 0.144 ± 0.070 (0.98) are among the cleanest terms in the model. Undetermined, as
+before: `ss_broken` (no Megascale rows) and `pro_nhhb` (0 in both). In the **stage-1** fit two terms fail the 3×
+rule, both because they are undetermined on FireProt rather than contradicted: `dTS` (−0.066 ± 0.018 vs
+0.000 ± 0.046; sign-free FireProt +0.052) and `dref_apolar/polar` (0.070 ± 0.006 vs 0.008 ± 0.061). They are kept
+in B6gs1 because they are well determined on Megascale and physically required, and the failure is a FireProt
+power problem (2,669 rows); this is disclosed rather than acted on.
+
+### Strata (Megascale-test per-protein ρ) and flags
+B6g vs B5 gains on exposed sites (0.554 → 0.565), charged WT (0.516 → 0.533), from-Gly (0.639 → 0.645) and
+large→small (0.795 → 0.802); unchanged on buried and buried small→large (0.495 → 0.487, still the fixed-backbone
+problem). B6gaf additionally gains on to-Pro (0.659 → 0.679) and at pLDDT < 50 (0.356 → 0.416). Stabilising
+mutations: AUROC 0.738 → 0.746 (B6g) and precision@5 0.152 → 0.190 (B6g) / 0.229 (B6gaf), the first variant to
+beat FoldX (0.219) on that metric. Domainome by pLDDT is unchanged in shape: ≥90 0.474, 70–90 0.311, 50–70
+−0.013, <50 −0.050 — still useless below 70, so AF reports should use the flag-kept subset.
+
+### Shipped files
+`results/ladder_physics/models/final_stage2.json` (B6g, default), `final_stage1.json` (B6gs1, fast mode),
+`final_af.json` (B6gaf, AF inputs only); `README.md` documents the schema, the feature contract and the
+two-stage attenuation rule (`scale_kind` / `scale_base` / `scale_plddt`) that `physddg/predict.py` must branch on
+(also posted to `notes/engine_mutate.md` as R-fit3). The superseded `B6*.json` files were removed; `B6x.json`
+remains for transparency.
+
+---
+
 ## B6: residual-analysis terms (2026-10-26, third issue)
+
+> **Superseded by D19** (section above): this section describes the 4-term B6 set, of which the shipped models
+> keep only `ncap_pref` and `helix_dipole`. The feature audit, the N-cap replacement and the G6 analysis below
+> still stand; the headline numbers are those of `B6x`.
 
 Rung B6 adds the terms that survived the residual analysis (`notes/residual_analysis.md`) to B5 (stage 2) and B4
 (stage 1 → `B6s1`). Everything was re-selected on Megascale-val + grouped CV on train after the feature audit below;

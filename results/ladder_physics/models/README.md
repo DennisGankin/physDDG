@@ -3,17 +3,22 @@
 Produced by `scripts/52_ladder_physics.py --stage fit`; loaded by `physddg/predict.py` and `physddg.fit.load_model`.
 All weights are in **kcal/mol per unit of the feature** and all models follow D1 (positive = destabilising).
 
-## Which file to use
-| file | stage | inputs | use |
-|---|---|---|---|
-| `B6.json` | 2 (mean-field, flexible neighbours) | crystal or AF | **default / best accuracy** |
-| `B6s1.json` | 1 (Boltzmann site, fixed env) | crystal or AF | **default fast mode** (~3.5x faster) |
-| `B6af.json`, `B6af_s1.json` | 2 / 1 | **AF models only** (B-factor = pLDDT) | AF mode; adds pLDDT attenuation |
-| `B5.json`, `B4.json` | 2 / 1 | any | previous rung, no B6 site terms |
-| `B6j.json`, `B4j.json`, `B5j.json` | 2 / 1 | any | joint Megascale+FireProt fit (larger magnitudes) |
-| `B6d15.json` | 2 | any | D15 state-function-only variant of B6 (see below) |
-| `*+C.json` | | | **test-informed** CXXC disulfide exception — do not use for reporting |
-| `B4-capC*.json`, `B4-noenv/phys/dF/odd*` | 1 / 2 | | ablations, not for production |
+## Which file to use (D19 release)
+| file | = | stage | inputs | use |
+|---|---|---|---|---|
+| **`final_stage2.json`** | B6g | 2 (mean-field, flexible neighbours) | crystal or AF | **default** |
+| **`final_stage1.json`** | B6gs1 | 1 (Boltzmann site, fixed env) | crystal or AF | **default fast mode** (~3.5x faster) |
+| **`final_af.json`** | B6gaf | 2 | **AF models only** (B-factor = pLDDT) | AF mode; adds pLDDT attenuation |
+| `B6g.json`, `B6gs1.json`, `B6gaf.json` | | | | same content as the `final_*` files (aliases) |
+| `B6x.json` | | 2 | any | B6g + `site_scsc`: Megascale/Domainome-tuned, worse on crystal sets. Transparency only |
+| `B5.json`, `B4.json` | | 2 / 1 | any | previous rung (no N-cap/dipole) |
+| `B4j.json`, `B5j.json` | | 1 / 2 | any | joint Megascale+FireProt fits |
+| `*+C.json` | | | | **test-informed** CXXC disulfide exception — do not use for reporting |
+| `B4-capC*`, `B4-noenv/phys/dF/odd*`, `B5-*` | | | | ablations, not for production |
+
+B6g = B5 + `ncap_pref` + `helix_dipole` (D19: the shipped default must generalise across assays, so the two WT-site
+terms `site_scsc` and `site_hbsc_bur` from the residual analysis are not in it). The `final_*` files carry
+`alias_of`, `release` and `description` keys in addition to the normal schema.
 
 ## Prediction rule
 ```
@@ -48,19 +53,20 @@ feature frame. Groups, in the order they appear in `B6.json`:
 | entropy / prior | `dTS`, `dprior_avg` | `s{1,2}_dTS`, `s{1,2}_dprior_avg` |
 | statistics | `d_env_cn_ss_bb`, `d_rama`, `d_rama_prev` | `physddg/rotlib.py` (PDB statistical potentials) |
 | B3+ remainder | `bur`, `pro_nhhb`, `gly_posphi`, `occ_dvol_loss`, `ss_broken` | `physddg/features_simple.py` |
-| **B6 additions** | `site_scsc`, `site_hbsc_bur`, `ncap_pref`, `helix_dipole` | `physddg/features_extra.py` (`site_table` + `candidate_features`) |
+| **B6g additions** | `ncap_pref`, `helix_dipole` (B6x adds `site_scsc`) | `physddg/features_extra.py` (`site_table` + `candidate_features`) |
 | unfolded-state prior | `dref_apolar`, `dref_polar` | `s{1,2}_dref_*`; present only when `derive_opts["drefp"]` is true |
 | attenuation | `scale_plddt` | computed at inference, see above |
 
-B6 feature definitions (all from the WT structure, no side-chain modelling):
-- `site_scsc` = min(side-chain heavy atoms of other residues within 4.5 Å of the WT side chain, 30)/30, for every
-  substitution (0 when wt == mut). A **site main effect**, not a state-function difference.
-- `site_hbsc_bur` = min(polar partner atoms within 3.5 Å of the WT side chain, 4) × (1 − RSA). Also site-only.
-- `ncap_pref` = E_ncap(mut) − E_ncap(wt) at N-cap positions only, in kT, from `physddg/data/ncap_pref.json`
-  (PDB-derived, `scripts/53_ncap_stats.py`). A state-function difference.
+B6g feature definitions (from the WT structure, no side-chain modelling; both are state-function differences, D15):
+- `ncap_pref` = E_ncap(mut) − E_ncap(wt) at N-cap positions only (0 elsewhere), in kT, from
+  `physddg/data/ncap_pref.json` (PDB-derived, `scripts/53_ncap_stats.py`). Weight ≈ 0.29 kcal/mol per kT.
 - `helix_dipole` = (q(mut) − q(wt)) × (+1 at helix N1–N3, −1 at C1–C3), q = formal side-chain charge, His neutral.
-`B6d15.json` replaces the two site-only terms with `scsc_dvol` and `hbsc_dpolar`, which are state-function
-differences (D15-compliant) and cost ~0.014 per-protein ρ.
+  Weight ≈ 0.09 kcal/mol per charge. (Measurably inert in B6g: dropping it changes CV by −0.001; kept per D19.)
+B6x only: `site_scsc` = min(side-chain heavy atoms of other residues within 4.5 Å of the WT side chain, 30)/30 for
+every substitution — a WT-site main effect (not a state-function difference).
+
+**pLDDT for `final_af.json`:** `flag_lowplddt = 1 − pLDDT/100` only when the structure is an AF model whose
+per-structure mean B-factor is in [30, 100]; 0 for crystal structures and for design models with B = 0.
 
 ## Reproducing
 `PYTHONPATH=. .venv/bin/python scripts/52_ladder_physics.py --stage fit` (selection: `--stage select|caps|b6`,
