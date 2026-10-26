@@ -1,0 +1,8 @@
+dms_id,uniprot,entry,n_single,n_dropped_unmappable,n_pos,wt_mismatch_af,target_eq_af_seq,offset,af_version,plddt_median,frac_plddt_lt70,rho_score_vs_burial,rho_score_vs_plddt,assay,year,author
+PTEN_HUMAN_Matreyek_2021,P60484,PTEN_HUMAN,5083,0,383,0,True,0,4,95.73999786376953,0.21562069643911075,-0.387,-0.487,Protein abundance (FACS sorting for abundance of GFP-fused target),2021,Matreyek
+TPMT_HUMAN_Matreyek_2018,P51580,TPMT_HUMAN,3648,0,241,0,True,0,4,98.2699966430664,0.05701754385964912,-0.42,-0.406,Protein abundance (FACS sorting for abundance of GFP-fused target),2018,Matreyek
+CP2C9_HUMAN_Amorosi_2021_abundance,P11712,CP2C9_HUMAN,6370,0,486,0,True,0,4,95.44999694824219,0.030141287284144426,-0.285,-0.287,protein abundance,2021,Amorosi
+NUD15_HUMAN_Suiter_2020,Q9NV35,NUD15_HUMAN,2844,0,163,0,True,0,4,97.55999755859375,0.07313642756680731,-0.452,-0.444,,2020,Suiter
+PRKN_HUMAN_Clausen_2023,O60260,PRKN_HUMAN,8756,0,465,0,True,0,4,88.54000091552734,0.20545911375057105,-0.504,-0.437,protein stability,2023,Clausen
+HXK4_HUMAN_Gersing_2023_abundance,P35557,HXK4_HUMAN,8396,0,463,0,True,0,4,96.05999755859375,0.02179609337779895,-0.225,-0.279,abundance,2023,Gersing
+RASK_HUMAN_Weng_2022_abundance,P01116,RASK_HUMAN,2850,216,167,0,False,-1,4,97.4000015258789,0.018947368421052633,-0.202,-0.323,Yeast growth,2022,Weng
