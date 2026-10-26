@@ -387,7 +387,9 @@ class PhysDDG:
             df = df.assign(struct_source=struct_source)
         # B6 terms (features_extra), as 52.add_extra: x_-prefixed site descriptors + candidate_features
         ex = site_tab.get("extra")
-        ex = ex if ex is not None else X.site_descriptors(str(structure))
+        if ex is None:                               # reuse the loaded model unless it is a trimmed/cropped copy
+            own = "rsa" in prot.ann and "trim_kept" not in prot.ann and "nterm_orig" not in prot.ann
+            ex = X.site_descriptors(str(structure), prot=prot if own else None)
         ex = ex.drop(columns=["structure_abs"]).add_prefix("x_").rename(columns={"x_chain": "chain",
                                                                                 "x_pdb_resnum": "pdb_resnum"})
         ex["pdb_resnum"] = ex["pdb_resnum"].astype(str)
@@ -541,7 +543,7 @@ def _prep(job):
     t = time.time()
     try:
         prot = annotate(load_protein(structure, keep_het=True))
-        tab = {"simple": FS.site_table(str(structure)), "extra": X.site_descriptors(str(structure))}
+        tab = {"simple": FS.site_table(str(structure)), "extra": X.site_descriptors(str(structure), prot=prot)}
     except Exception as e:  # noqa: BLE001
         return structure, rows, None, None, repr(e), time.time() - t
     return structure, rows, prot, tab, None, time.time() - t

@@ -317,10 +317,11 @@ def _pairs_within(tree_a, tree_b, r: float):
     return i, j
 
 
-def site_descriptors(path: str) -> pd.DataFrame:
+def site_descriptors(path: str, prot=None) -> pd.DataFrame:
     """Per-residue site descriptors (see module docstring). Vectorised version (2026-10-26, E1) of
-    `_site_descriptors_v1`, identical values (tests/test_features_extra.py)."""
-    p = S.annotate(S.load_protein(path, keep_het=False))
+    `_site_descriptors_v1`, identical values (tests/test_features_extra.py). `prot`: the already loaded and annotated
+    (incl. SASA) structure of `path`, to skip re-loading (must be the file's own model, not a trimmed copy)."""
+    p = prot if prot is not None else S.annotate(S.load_protein(path, keep_het=False))
     L = len(p)
     a = p.ann
     at = p.atoms()

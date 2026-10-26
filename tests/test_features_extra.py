@@ -32,3 +32,15 @@ def test_site_descriptors_identical(path):
             assert np.nanmax(np.abs(x - y), initial=0.0) <= 1e-6, c
         else:
             assert (x == y).all(), c
+
+
+def test_site_descriptors_prot_argument():
+    from physddg.structure import annotate, load_protein
+    f = "/workspace/data/megascale_pdbs/1PSE.pdb"
+    if not Path(f).exists():
+        pytest.skip("structure not available")
+    a = X.site_descriptors(f)
+    b = X.site_descriptors(f, prot=annotate(load_protein(f, keep_het=True)))
+    num = [c for c in a.columns if a[c].dtype.kind in "fiub"]
+    assert np.array_equal(a[num].to_numpy(float), b[num].to_numpy(float), equal_nan=True)
+    assert (a.drop(columns=num) == b.drop(columns=num)).all().all()
