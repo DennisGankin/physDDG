@@ -43,7 +43,11 @@ def cfg_tag(stage: int) -> str:
     from physddg.mutate import MutateConfig
     d = asdict(MutateConfig())
     d["params"] = {k: v for k, v in d["params"].items() if k != "extra"}
-    return hashlib.md5(json.dumps([stage, d], sort_keys=True, default=str).encode()).hexdigest()[:8]
+    # energy / geometry sources and statistics tables also define the result (mutate.py is covered by the config)
+    src = [ROOT / "physddg" / f for f in ("params.py", "energy.py", "builder.py", "topology.py")]
+    src += [ROOT / "physddg" / "data" / f for f in ("rotlib_bbdep.npz", "pdbstats.npz")]
+    h = hashlib.md5(b"".join(f.read_bytes() for f in src)).hexdigest()
+    return hashlib.md5(json.dumps([stage, d, h], sort_keys=True, default=str).encode()).hexdigest()[:8]
 
 
 def norm_resnum(s: pd.Series) -> pd.Series:
