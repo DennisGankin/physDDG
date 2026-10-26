@@ -76,3 +76,43 @@
   fitting + evaluation end-to-end → first numbers.
 - Stage 2: neighbour repacking (batched GPU packer), continuous refinement.
 - Stage 3: AF mode, extra terms, ablations, speed work.
+
+---
+# v1 revisions after independent critique (notes/critique_design_v0.md), 2026-10-26
+
+Accepted (PI decisions D4–D10):
+- **D4 Environment-dependent statistical potential** E_env(aa | burial × SS [× φ/ψ basin]) from the culled PDB set,
+  one fitted weight; table entries are structural statistics, not ΔΔG-fitted. Highest-priority addition.
+- **D5 Boltzmann averaging** over rotamers (F = −kT ln Σ e^{−E/kT}) instead of min-energy; side-chain entropy comes
+  out of it (term 8 dropped as a separate term, kept only as an ablation). Packer = batched mean-field / Gibbs, not DEE.
+- **D6 Symmetric modelling**: mutated site uses library rotamers only for both WT and mutant (no "include current"
+  at the site); neighbours may carry their native rotamer (identical in both states). Flexible set = union of WT and
+  mutant neighbourhoods. Hard test: WT→WT returns exactly 0.
+- **D7 Reference energies** r = r_prior(EEF1) + δ_shared (strong shrinkage) + δ_Megascale (nuisance, dropped at
+  inference) because Tsuboyama ΔG already contains a PSSM unfolded-state model; X→Pro / Pro→X handled with care
+  (proteolysis channel).
+- **D8 Censoring-aware objective**: Megascale fitted in ΔG space with interval (Tobit-style) likelihood using
+  ΔG_wt and CI where available; per-domain-centred robust loss + within-domain rank surrogate; dataset weights by
+  clusters not rows; per-assay scale/offset nuisance. Domainome only as validation (sigmoidal per-domain link),
+  not for fitting energy weights.
+- **D9 Site-dependent repulsion cap** cap = c0 + c1·flex(site) (contact number; B-factor or pLDDT) — the fixed-backbone
+  small→large fix; backbone ensembles only if residuals demand it.
+- **D10 Electrostatics** screened (Debye–Hückel ~0.15 M) with burial-dependent attenuation; His neutral; must be shown
+  to help in ablation or reported as not helping. Helix dipole/capping, cavity and helix-propensity terms deferred.
+
+Frozen-parameter rule: radii, well depths, EEF1 values, H-bond geometry, cutoffs are taken from literature and listed in
+physddg/params.py with provenance; anything tuned after seeing a test number counts as fitted and is disclosed.
+
+## Baseline ladder & pre-registered gates (identical rows; grouped CV; natural-only Megascale primary)
+B0 residue-pair lookup · B1 RSA · B2 hydrophobicity×burial+Δref · B3 statistical potential + burial (2 weights) ·
+B4 Stage-1 lite (all terms, Boltzmann mutant side chain in fixed WT environment) · B5 +neighbour repacking ·
+B6 +backbone ensemble · B7 +continuous χ refinement · X FoldX 5.1 native.
+- G1 physics earns its keep: B4 ≥ X + 0.08 per-domain Spearman (Megascale-test natural) and ≥ +0.05 Pearson FireProt-test; B4 − B3 ≥ 0.03 (if < 0.02 say so).
+- G2 repacking: B5 − B4 ≥ 0.02 overall and ≥ 0.03 on buried small→large, in ≥ 70% CV folds, within speed target; else drop.
+- G3 backbone ensemble only if buried volume-change residual slope significant; then B6 − B5 ≥ 0.015.
+- G4 continuous refinement: ≥ 0.01 at ≤ 2× runtime.
+- G5 AF mode: paired xtal/AF per-site agreement r ≥ 0.9 after uniform repacking; pLDDT attenuation ships only if Domainome +0.02 and Megascale-test ≥ −0.005.
+- G6 transfer: weights fitted on Megascale-only vs FireProt-only — no sign flips, no > 3× changes; failing terms shrunk/deleted.
+- G7 leakage: every headline reported on full and strict non-homologous (< 25–30% id) subsets; if gap > 0.05 the strict number is the headline.
+Note (PI): the critic proposes Stage 2 only after G1/G6. I keep the GPU packer on the critical path in parallel because
+(a) it is needed for AF uniform repacking (G5) and (b) Boltzmann averaging over a single site already needs most of it.
