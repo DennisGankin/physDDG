@@ -97,6 +97,17 @@ with torch.no_grad():
     t = timeit(lambda: E.local_energy(mv[:, None], env_full, p), n=5)
 rows.append(dict(test="local_10k_variants_1site_vs_protein", residues=1, atoms=float(m15.sum(1).float().mean()),
                  env_atoms=int(env_full.f["m"][:-1].sum()), variants=B, seconds=t, evals_per_s=B / t))
+# same local tests with the torch.compile'd short-range kernel (compile time excluded: warm-up)
+E.enable_compile(True)
+with torch.no_grad():
+    t = timeit(lambda: E.local_energy(mov, env, p), n=5)
+    rows.append(dict(test="compiled_local_10k_x_3res_vs_env", residues=len(flex), atoms=n_mov, env_atoms=n_env,
+                     variants=B, seconds=t, evals_per_s=B / t))
+    t = timeit(lambda: E.local_energy(mv[:, None], env_full, p), n=5)
+    rows.append(dict(test="compiled_local_10k_variants_1site_vs_protein", residues=1,
+                     atoms=float(m15.sum(1).float().mean()), env_atoms=int(env_full.f["m"][:-1].sum()), variants=B,
+                     seconds=t, evals_per_s=B / t))
+E.enable_compile(False)
 df = pd.DataFrame(rows)
 print(torch.cuda.get_device_name(0))
 print(df.to_string(index=False))

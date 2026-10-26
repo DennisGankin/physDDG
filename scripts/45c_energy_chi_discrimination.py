@@ -98,7 +98,10 @@ def summarise(df: pd.DataFrame, names, tag):
     df["d_total_norep"] = df.d_total_unit - df.d_lj_rep
     out = []
     terms = [f"d_{n}" for n in names] + ["d_lj", "d_solv", "d_hb", "d_total_unit", "d_total_norep"]
-    for kind, sub in df.groupby("kind"):
+    # clash-free perturbations: does attraction/solvation/H-bonding alone recognise the native?
+    nc = df[df.d_lj_rep < 0.5].copy()
+    nc["kind"] = nc["kind"] + "_noclash"
+    for kind, sub in pd.concat([df, nc]).groupby("kind"):
         for t in terms:
             x = sub[t].to_numpy()
             nz = np.abs(x) > 1e-4

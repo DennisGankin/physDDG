@@ -321,23 +321,44 @@ def _cosd(a: float) -> float:
 def _pair_sep(fa: dict, fb: dict) -> torch.Tensor:
     """Bond separation codes [..., A, A] (int8, 0 = excluded, 3 = 1-4, 4 = far) between two different residues."""
     T = tables(fa["x"].device)
+    na, nb = fa["x"].shape[-2], fb["x"].shape[-2]               # slot widths (may be trimmed, see _trim)
     aa_a, aa_b = fa["aa"], fb["aa"]
     dpos = fb["pos"] - fa["pos"]
     shape = torch.broadcast_shapes(aa_a.shape, aa_b.shape)
     aa_a, aa_b, dpos = aa_a.expand(shape), aa_b.expand(shape), dpos.expand(shape)
-    far = torch.full((*shape, A, A), 4, dtype=torch.int8, device=aa_a.device)
-    fwd = T["sep_pep"][aa_a, aa_b]                               # a precedes b
-    bwd = T["sep_pep"][aa_b, aa_a].transpose(-1, -2)             # b precedes a
+    far = torch.full((*shape, na, nb), 4, dtype=torch.int8, device=aa_a.device)
+    fwd = T["sep_pep"][aa_a, aa_b][..., :na, :nb]                              # a precedes b
+    bwd = T["sep_pep"][aa_b, aa_a].transpose(-1, -2)[..., :na, :nb]            # b precedes a
     adj = (dpos.abs() == 1)[..., None, None]
     sep = torch.where((dpos == 1)[..., None, None], fwd, torch.where((dpos == -1)[..., None, None], bwd, far))
     # backbone-backbone pairs of peptide-bonded neighbours: fixed by the backbone, aa-independent -> excluded
-    bbbb = T["is_bb"][:, None] & T["is_bb"][None, :]
+    bbbb = T["is_bb"][:na, None] & T["is_bb"][None, :nb]
     sep = torch.where(adj & bbbb, torch.zeros_like(sep), sep)
     # disulfide bond (both Cys, SG-SG < ss_bond_max)
-    sga, sgb = fa["x"][..., 5, :], fb["x"][..., 5, :]
-    ss = (aa_a == C_IDX) & (aa_b == C_IDX) & (((sga - sgb) ** 2).sum(-1) < 2.5 ** 2) & fa["m"][..., 5] & fb["m"][..., 5]
-    sep = torch.where(ss[..., None, None], torch.minimum(sep, T["sep_ss"]), sep)
+    if na > 5 and nb > 5:
+        sga, sgb = fa["x"][..., 5, :], fb["x"][..., 5, :]
+        ss = (aa_a == C_IDX) & (aa_b == C_IDX) & (((sga - sgb) ** 2).sum(-1) < 2.5 ** 2) & fa["m"][..., 5] & fb["m"][..., 5]
+        sep = torch.where(ss[..., None, None], torch.minimum(sep, T["sep_ss"][:na, :nb]), sep)
     return sep
+
+
+SLOT_KEYS = ("x", "m", "t", "q", "don", "acc", "dcone", "dvec", "avec", "bb", "cap", "bur") + COLS
+
+
+VEC_KEYS = ("x", "dvec", "avec")
+
+
+def _trim(f: dict, n: int) -> dict:
+    """Keep the first n atom slots of every per-slot feature (empty slot tails cost compute only)."""
+    if n >= A:
+        return f
+    return {k: (v.narrow(-2 if k in VEC_KEYS else -1, 0, n) if k in SLOT_KEYS else v) for k, v in f.items()}
+
+
+def _width(m: torch.Tensor) -> int:
+    """1 + index of the last present slot over all leading dims of mask m [..., A]."""
+    pres = m.reshape(-1, m.shape[-1]).any(0)
+    return int(torch.nonzero(pres).max().item()) + 1 if bool(pres.any()) else 1
 
 
 # ============================================================================= short-range core
@@ -431,6 +452,8 @@ def _dssp_pair(fd: dict, fa: dict, nonadj: torch.Tensor, p: EnergyParams) -> tor
     okd = fd["don"][..., 0] & ~fd["dcone"][..., 0]                     # needs a placed amide H
     tot = 0.0
     for s in (3, OXT):
+        if s >= fa["x"].shape[-2]:
+            continue
         o = fa["x"][..., s, :]
         c = o - p.co_len * fa["avec"][..., s, :]
         ok = okd & fa["acc"][..., s] & nonadj
@@ -495,15 +518,29 @@ def _disulf(sga, cba, sgb, cbb, ok, p: EnergyParams) -> torch.Tensor:
 
 def _block_pair_all(fa: dict, fb: dict, p: EnergyParams) -> torch.Tensor:
     """All terms between two different residues (broadcast leading dims) -> [..., n_terms]."""
+    fa, fb = _trim(fa, _width(fa["m"])), _trim(fb, _width(fb["m"]))
     sep = _pair_sep(fa, fb)
     dpos = (fb["pos"] - fa["pos"]).abs()
     sr = _core(fa, fb, sep, dpos >= 2, p)
     qv = (fa["q"] != 0)[..., :, None] & (fb["q"] != 0)[..., None, :] & (sep >= 4)
     el = _elec(fa["x"], fa["q"], fa["bur"], fb["x"], fb["q"], fb["bur"], qv, p)
-    ok = (fa["aa"] == C_IDX) & (fb["aa"] == C_IDX) & fa["m"][..., 5] & fb["m"][..., 5]
-    ss = _disulf(fa["x"][..., 5, :], fa["x"][..., 4, :], fb["x"][..., 5, :], fb["x"][..., 4, :], ok, p)
+    if fa["x"].shape[-2] > 5 and fb["x"].shape[-2] > 5:
+        ok = (fa["aa"] == C_IDX) & (fb["aa"] == C_IDX) & fa["m"][..., 5] & fb["m"][..., 5]
+        ss = _disulf(fa["x"][..., 5, :], fa["x"][..., 4, :], fb["x"][..., 5, :], fb["x"][..., 4, :], ok, p)
+    else:
+        ss = sr.new_zeros(sr.shape[:-1])
     shape = torch.broadcast_shapes(sr.shape[:-1], el.shape[:-1], ss.shape)
     return torch.cat([sr.expand(*shape, -1), el.expand(*shape, -1), ss.expand(shape)[..., None]], -1)
+
+
+_core_eager = _core
+
+
+def enable_compile(on: bool = True) -> None:
+    """Fuse the short-range kernel with torch.compile (Triton). ~2x faster on large batches, ~40 s compile per
+    new shape pattern, results differ from eager by float32 rounding (~1e-5 relative). Off by default."""
+    global _core
+    _core = torch.compile(_core_eager, dynamic=True) if on else _core_eager
 
 
 # ============================================================================= public API
@@ -513,9 +550,11 @@ def intra_energy(b: Blocks, p: EnergyParams | None = None, include_ref: bool = T
     p = p or EnergyParams()
     f = f if f is not None else features(b, p)
     T = tables(b.device)
-    sep = T["sep_intra"][f["aa"]]
-    sep = sep * torch.triu(torch.ones(A, A, dtype=torch.int8, device=b.device), 1)
-    sr = _core(f, f, sep, torch.zeros_like(f["aa"], dtype=torch.bool), p)
+    w = _width(f["m"])
+    ft = _trim(f, w)
+    sep = T["sep_intra"][f["aa"]][..., :w, :w]
+    sep = sep * torch.triu(torch.ones(w, w, dtype=torch.int8, device=b.device), 1)
+    sr = _core(ft, ft, sep, torch.zeros_like(f["aa"], dtype=torch.bool), p)
     if include_ref:
         ref = f["dg_ref"] * f["m"].float()
         sr = sr.clone()
@@ -545,11 +584,14 @@ def _gather_f(f: dict, idx: torch.Tensor) -> dict:
 
 @dataclass
 class Env:
-    """Fixed environment for local energies: features of E residues (+ one empty sentinel block)."""
+    """Fixed environment for local energies: per-slot features of E residues (+ one empty sentinel block at
+    index E) and flat lists of its charged atoms and Cys SG atoms (electrostatics / disulfide)."""
     f: dict
     ca: torch.Tensor          # [E+1, 3]
     reach: torch.Tensor       # [E+1] max distance of a present atom from CA
     res_index: torch.Tensor   # [E] index of each env residue in the source Blocks
+    q: dict                   # charged atoms: x [Nc,3], q, bur, aa, slot, pos, res (env block index)
+    sg: dict                  # Cys SG: x [Ns,3], cb [Ns,3], res
 
     @property
     def n(self) -> int:
@@ -564,9 +606,8 @@ def make_env(blocks: Blocks, exclude=None, p: EnergyParams | None = None) -> Env
     if exclude is not None:
         keep[torch.as_tensor(exclude, device=blocks.device)] = False
     idx = torch.nonzero(keep).squeeze(1)
-    sub = blocks[idx]
-    f = features(sub, p)
-    # sentinel empty block at index E
+    f = features(blocks[idx], p)
+    E_ = idx.shape[0]
     pad = {}
     for k, v in f.items():           # sentinel = copy of block 0 with no atoms, far away
         z = v[:1].clone()
@@ -581,13 +622,19 @@ def make_env(blocks: Blocks, exclude=None, p: EnergyParams | None = None) -> Env
         pad[k] = torch.cat([v, z], 0)
     ca = pad["x"][:, 1]
     dist = torch.where(pad["m"][..., None], pad["x"] - ca[:, None], torch.zeros_like(pad["x"])).norm(dim=-1)
-    return Env(f=pad, ca=ca, reach=dist.max(-1).values, res_index=idx)
+    r, s_ = torch.nonzero(f["q"] != 0, as_tuple=True)
+    q = dict(x=f["x"][r, s_], q=f["q"][r, s_], bur=f["bur"][r, s_], aa=f["aa"][r], slot=s_, pos=f["pos"][r], res=r)
+    rc = torch.nonzero((f["aa"] == C_IDX) & f["m"][:, 5]).squeeze(1)
+    sg = dict(x=f["x"][rc, 5], cb=f["x"][rc, 4], res=rc)
+    del E_
+    return Env(f=pad, ca=ca, reach=dist.max(-1).values, res_index=idx, q=q, sg=sg)
 
 
 def env_neighbors(env: Env, ca: torch.Tensor, reach: torch.Tensor | float, p: EnergyParams,
-                  env_mask: torch.Tensor | None = None, elec: bool = False) -> torch.Tensor:
-    """Indices [..., K] of env blocks that can interact with residues at `ca` [..., 3] (padded with sentinel E)."""
-    cut = p.elec_off if elec else max(p.lj_off, p.solv_off)
+                  env_mask: torch.Tensor | None = None) -> torch.Tensor:
+    """Indices [..., K] of env blocks whose atoms can come within the short-range cutoff of a residue at `ca`
+    [..., 3] with extent `reach` (padded with the sentinel index E)."""
+    cut = max(p.lj_off, p.solv_off)
     d = (ca[..., None, :] - env.ca[:-1]).norm(dim=-1)                     # [..., E]
     ok = d < cut + env.reach[:-1] + (reach[..., None] if torch.is_tensor(reach) else reach)
     if env_mask is not None:
@@ -599,50 +646,89 @@ def env_neighbors(env: Env, ca: torch.Tensor, reach: torch.Tensor | float, p: En
 
 def env_energy(mov: Blocks, env: Env, p: EnergyParams | None = None, env_mask: torch.Tensor | None = None,
                f: dict | None = None) -> torch.Tensor:
-    """Energy of residues `mov` [...] (e.g. [B] variants/rotamers of one site) with a fixed environment
-    -> [..., n_terms]. env_mask [..., E] optionally removes env residues per batch element.
-    Short-range terms use env blocks within cutoff+reach; electrostatics within elec_off+reach."""
+    """Energy of residues `mov` [...] (e.g. [B] variants/rotamers of a site) with a fixed environment
+    -> [..., n_terms]. env_mask: [E] or [..., E] bool, env residues to keep (per batch element).
+
+    Elements are grouped by site (same `pos`); per site the env blocks within cutoff + extents are gathered
+    once and broadcast over all variants of that site; electrostatics uses the env's flat charged-atom list."""
     p = p or EnergyParams()
     f = f if f is not None else features(mov, p)
     lead = mov.shape
     fl = {k: v.reshape(-1, *v.shape[len(lead):]) for k, v in f.items()}
     n = fl["aa"].shape[0]
-    ca = fl["x"][:, 1]
-    reach = torch.where(fl["m"][..., None], fl["x"] - ca[:, None], torch.zeros_like(fl["x"])).norm(dim=-1).max(-1).values
-    em = None if env_mask is None else env_mask.reshape(-1, env.n) if env_mask.dim() > 1 else env_mask
-    out = []
-    # shared neighbour list when all elements sit at the same site (same CA): common for variant batches
-    shared = em is None or em.dim() == 1
-    if shared and n > 0 and torch.all((ca - ca[:1]).abs().max() < 1e-3):
-        nb_s = env_neighbors(env, ca[0], reach.max(), p, em, elec=False)          # [K]
-        nb_e = env_neighbors(env, ca[0], reach.max(), p, em, elec=True)
-        fe_s, fe_e = _gather_f(env.f, nb_s[None]), _gather_f(env.f, nb_e[None])  # [1, K, ...]
-        for sl in _chunks(n, nb_s.numel() * A * A, p):
-            fm = {k: v[sl][:, None] for k, v in fl.items()}                       # [b, 1, ...]
-            out.append(_env_terms(fm, fe_s, fe_e, p))
+    nt = len(term_names(p))
+    out = torch.zeros(n, nt, device=mov.device, dtype=fl["x"].dtype)
+    if n == 0:
+        return out.reshape(*lead, nt)
+    em = None
+    if env_mask is not None:
+        em = env_mask if env_mask.dim() == 1 else env_mask.reshape(-1, env.n)
+    xd, md = fl["x"].detach(), fl["m"]
+    with torch.no_grad():
+        _, inv = torch.unique(fl["pos"], return_inverse=True)      # group = site (chain-aware position)
+    for g in range(int(inv.max()) + 1):
+        idx = torch.nonzero(inv == g).squeeze(1)
+        ca_g = xd[idx[0], 1]
+        reach_g = torch.where(md[idx][..., None], xd[idx] - ca_g, torch.zeros_like(xd[idx])).norm(dim=-1).max()
+        em_g = None if em is None else (em if em.dim() == 1 else em[idx].any(0))
+        nb = env_neighbors(env, ca_g, reach_g, p, em_g)                                    # [K]
+        fe = _gather_f(env.f, nb[None])                                                    # [1, K, ...]
+        dq = (env.q["x"] - ca_g).norm(dim=-1) < p.elec_off + reach_g
+        qsel = torch.nonzero(dq & (True if em_g is None else em_g[env.q["res"]])).squeeze(1)
+        qe = {k: v[qsel] for k, v in env.q.items()}
+        ssel = torch.nonzero((env.sg["x"] - ca_g).norm(dim=-1) < 3.0 + reach_g).squeeze(1)
+        se = {k: v[ssel] for k, v in env.sg.items()}
+        width = (md[idx] * torch.arange(1, A + 1, device=md.device)).max(-1).values
+        idx = idx[torch.argsort(width, stable=True)]                    # similar sizes share a chunk (trimming)
+        for sl in _chunks(idx.shape[0], nb.numel() * A * A, p):
+            ii = idx[sl]
+            fm = {k: v[ii][:, None] for k, v in fl.items()}                               # [b, 1, ...]
+            fe_b, qm_b, sm_b = fe, None, None
+            if em is not None and em.dim() > 1:
+                emb = em[ii]
+                fe_b = dict(fe, m=fe["m"] & torch.cat([emb, emb.new_zeros(emb.shape[0], 1)], 1)[:, nb][..., None])
+                qm_b, sm_b = emb[:, qe["res"]], emb[:, se["res"]]
+            out[ii] = _env_terms(fm, fe_b, qe, qm_b, se, sm_b, p)
+    return out.reshape(*lead, nt)
+
+
+def _env_terms(fm: dict, fe: dict, qe: dict, qmask, se: dict, smask, p: EnergyParams) -> torch.Tensor:
+    """fm [b, 1, ...] moving residues; fe [1|b, K, ...] env blocks; qe flat env charges [Nc]; se env SG [Ns];
+    qmask [b, Nc] / smask [b, Ns] optional per-element env masks. Returns [b, n_terms]."""
+    fms, fes = _trim(fm, _width(fm["m"])), _trim(fe, _width(fe["m"]))                    # drop empty slot tails
+    sep = _pair_sep(fms, fes)
+    nonadj = (fe["pos"] - fm["pos"]).abs() >= 2
+    sr = _core(fms, fes, sep, nonadj, p).sum(1)                                            # [b, 7]
+    b = sr.shape[0]
+    # electrostatics: compress the moving residue's charged slots, vs the env's flat charged atoms
+    qm = fm["q"][:, 0]                                                                     # [b, A]
+    nq = int((qm != 0).sum(-1).max().item())
+    if nq > 0 and qe["q"].numel() > 0:
+        o = torch.argsort((qm == 0).to(torch.int8), dim=-1, stable=True)[:, :nq]           # [b, nq]
+        xm = torch.gather(fm["x"][:, 0], 1, o[..., None].expand(-1, -1, 3))
+        q_ = torch.gather(qm, 1, o)
+        bm = torch.gather(fm["bur"][:, 0], 1, o)
+        T = tables(qm.device)
+        aa_m, pos_m = fm["aa"][:, 0], fm["pos"][:, 0]
+        dpos = qe["pos"][None, :] - pos_m[:, None]                                          # [b, Nc]
+        sf = T["sep_pep"][aa_m[:, None, None], qe["aa"][None, None, :], o[:, :, None], qe["slot"][None, None, :]]
+        sb = T["sep_pep"][qe["aa"][None, None, :], aa_m[:, None, None], qe["slot"][None, None, :], o[:, :, None]]
+        sep_q = torch.where((dpos == 1)[:, None], sf, torch.where((dpos == -1)[:, None], sb, torch.full_like(sf, 4)))
+        valid = (q_ != 0)[:, :, None] & (sep_q >= 4)
+        if qmask is not None:
+            valid = valid & qmask[:, None, :]
+        el = _elec(xm, q_, bm, qe["x"][None], qe["q"][None], qe["bur"][None], valid, p)   # [b, n_modes]
     else:
-        for sl in _chunks(n, 64 * A * A, p):
-            m_ = None if em is None else (em if em.dim() == 1 else em[sl])
-            nb_s = env_neighbors(env, ca[sl], reach[sl], p, m_, elec=False)       # [b, K]
-            nb_e = env_neighbors(env, ca[sl], reach[sl], p, m_, elec=True)
-            fm = {k: v[sl][:, None] for k, v in fl.items()}
-            out.append(_env_terms(fm, _gather_f(env.f, nb_s), _gather_f(env.f, nb_e), p))
-    res = torch.cat(out, 0) if out else torch.zeros(0, len(term_names(p)), device=mov.device)
-    return res.reshape(*lead, -1)
-
-
-def _env_terms(fm: dict, fe_s: dict, fe_e: dict, p: EnergyParams) -> torch.Tensor:
-    """fm [b, 1, ...] moving residues; fe_s/fe_e [1|b, K, ...] env blocks (short-range / elec sets)."""
-    sep = _pair_sep(fm, fe_s)
-    nonadj = (fe_s["pos"] - fm["pos"]).abs() >= 2
-    sr = _core(fm, fe_s, sep, nonadj, p).sum(1)                                   # [b, 7]
-    sep_e = _pair_sep(fm, fe_e)
-    qv = (fm["q"] != 0)[..., :, None] & (fe_e["q"] != 0)[..., None, :] & (sep_e >= 4)
-    el = _elec(fm["x"], fm["q"], fm["bur"], fe_e["x"], fe_e["q"], fe_e["bur"], qv, p).sum(1)
-    ok = (fm["aa"] == C_IDX) & (fe_e["aa"] == C_IDX) & fm["m"][..., 5] & fe_e["m"][..., 5]
-    ss = _disulf(fm["x"][..., 5, :], fm["x"][..., 4, :], fe_e["x"][..., 5, :], fe_e["x"][..., 4, :], ok, p).sum(1)
-    b = max(sr.shape[0], el.shape[0])
-    return torch.cat([sr.expand(b, -1), el.expand(b, -1), ss.expand(b)[:, None]], -1)
+        el = sr.new_zeros(b, len(p.elec_modes))
+    # disulfide
+    if se["x"].shape[0] > 0:
+        ok = ((fm["aa"][:, 0] == C_IDX) & fm["m"][:, 0, 5])[:, None].expand(-1, se["x"].shape[0])
+        if smask is not None:
+            ok = ok & smask
+        ss = _disulf(fm["x"][:, 0, 5][:, None], fm["x"][:, 0, 4][:, None], se["x"][None], se["cb"][None], ok, p).sum(1)
+    else:
+        ss = sr.new_zeros(b)
+    return torch.cat([sr, el, ss[:, None]], -1)
 
 
 def local_energy(mov: Blocks, env: Env, p: EnergyParams | None = None, env_mask: torch.Tensor | None = None,
