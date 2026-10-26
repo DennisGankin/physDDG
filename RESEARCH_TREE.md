@@ -59,7 +59,10 @@ Decisions are logged as D<n> (see bottom). Dates are 2026.
   - [-] Watch: stabilising precision@5 worse than FoldX (0.13–0.15 vs 0.22); all methods ≈ 0 at pLDDT<70 on Domainome; FoldX still better on buried small→large
 - [~] 4.7 D9 site-dependent cap variants + reverse scoring on modelled mutant + backbone-ensemble pre-test (agent: E1)
 - [~] 4.8 Residual analysis: where is the remaining error, candidate terms (agent: resid)
-- [~] 4.9 Independent audit: PDB-statistics leakage, fitting leakage, evaluation correctness, over-claims (agent: audit)
+- [x] 4.9 Independent audit (notes/audit_1.md): headline numbers recomputed from raw preds match to 4 decimals; no test labels enter fitting; no critical issues
+  - [!] Over-claims corrected: (a) CXXC disulfide exception was derived from 2 FireProt-test rows (2TRX) — joint-model FP-test r falls 0.48→0.39 without it → treat as test-informed, report without; (b) S461 24.5% rows are exact Megascale-train mutations → report strict only; (c) Ssym is NOT a test for joint (FireProt-trainval) models (85.7% exact overlap); (d) G1 FAILS under D16 (B4−FoldX +0.048 [−0.008,+0.105], B5 +0.058 [−0.003,+0.113]) — only Pearson is clearly better; (e) FoldX Pearson gap is mostly its uncapped tail (clip to [−3,8], no fitting: 0.445→0.596 → gap +0.10 not +0.25) → always report FoldX-clipped too; (f) 'natural' Megascale subset not homology-clean (1TUC, 2KXD) but strict 0.687 ≈ 0.677; headline rests on 21 proteins
+  - PDB-statistics overlap with test proteins (10/28 MS-test, 24/27 FP-test, 70/94 S669…) exists but harmless: re-derived without 300 overlapping chains → ρ change ≤ 0.0005; disclose only
+  - Where we are NOT better than a competitor: Domainome ρ_dom (FoldX 0.430 vs 0.405), FireProt per-protein ρ (tmol 0.678 vs ours 0.578, 9 proteins), S669-strict r (DDGun3D), S461-strict per-protein (KORPM), buried small→large (FoldX), stabilising precision@5 (FoldX), Ssym antisymmetry (KORPM, DDGun3D)
 - [ ] 4.5 Unfolded-state / reference model
 - [ ] 4.6 Parameter fitting (few interpretable weights, grouped CV)
 
@@ -71,6 +74,7 @@ Decisions are logged as D<n> (see bottom). Dates are 2026.
 - [ ] 6.1 Profiling, GPU kernels, throughput benchmark vs FoldX
 
 ## Decisions
+- D17 (10-26) Reporting protocol after audit: every table on identical rows; S461/S669 on strict subsets (no Megascale-train overlap); Ssym only as antisymmetry diagnostic (and never for models that touch FireProt-trainval); FoldX reported both raw and clipped to [−3,8]; Megascale headline on natural AND natural-strict AND all; no test-informed rules in headline models (CXXC exception removed from headline, shown as a separate variant); gate verdicts from paired-bootstrap CIs.
 - D15 (10-26) Antisymmetry by construction: every term must be a difference of a state function S(aa, structure) between mutant and WT (burial-only / site-only terms are not allowed in the primary model; if used, only as a reported ablation). Reverse mutations are scored on the mutant structure.
 - D16 (10-26) Gate G1 re-based on the measured ladder: primary metric = Megascale-test natural per-protein median ρ; physics engine B4 must reach ≥ B3+ + 0.03 (≈ 0.68) and beat FoldX with paired-bootstrap CI excluding 0; B3 (2 weights) was too low a bar.
 - D14 (10-26) Repulsion radii scaled ×0.9 by default (raises native-χ recognition among non-clashing perturbations 28%→62%; calibrated on structures, not ΔΔG).
