@@ -61,7 +61,7 @@ def process(t):
     best = None
     tried = []
     for c in afdb_io.candidates(acc):
-        off = afdb_io.FRAG_STEP * (c["frag"] - 1) if c["n_frags"] > 1 else 0
+        off = c["uniprot_offset"]
         seq, nums, pl = afdb_io.structure_seq(c["text"])
         # AF numbering is 1..len within the model
         lo, hi = start - off, end - off
