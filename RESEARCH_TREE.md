@@ -100,7 +100,10 @@ Decisions are logged as D<n> (see bottom). Dates are 2026.
     (14% of rows) gains +0.038 ρ_dom for B4, +0.020 for B3+ — more than all treatments combined.
 
 ## 6. Speed & packaging
-- [~] 6.1 Predictor CLI/API (physddg predict), profiling, torch.compile / bf16 / multi-GPU, throughput table vs FoldX/KORPM, real WT→WT / no-native-rotamer tests, README (agent: E1)
+- [x] 6.1 Predictor CLI/API (`scripts/physddg predict`, physddg/predict.py; per-term contributions c_* sum to ddg; flags), README.md, real tests (no native rotamer at site to 1e-6; WT→WT exactly 0; bitwise deterministic across runs/GPUs) — predict() reproduces B4 stored preds exactly
+  - [!] Speed (1× RTX 4090, end to end): Stage 1 ~1,500–2,000 mut/s (0.5–0.7 ms/mut): 59 res 0.6 s, 141 res 1.4 s, 269 res 2.9 s, 597 res 7.8 s; Stage 2 540–715 mut/s (269 res 7.2 s). Whole Megascale-test (28k) 9.5 s S1 / 17 s S2 on 4 GPUs; Domainome (532k) 55 s S1 / 172 s S2. vs FoldX 5.1 hours of CPU per scan; ≈ KORPM (0.44 ms/mut/core) per mutation — speed alone is not the contribution
+  - [-] torch.compile (no gain S1, 15% S2, 60 s compile), multi-site batching (2× slower), fp16/bf16, CUDA graphs: not applied
+  - Open: fit.py sets torch float64 globally on import (breaks test_energy::test_site_dependent_cap in full pytest) → fix in fit.py; AF-mode trimming not yet wired into predict()
 
 ## Decisions
 - D18 (10-26) AF mode default: MAVISp-style trim of low-pLDDT windows/termini (packed-exempt) + construct crop + Stage-2 shell repack with AF side chains kept elsewhere + per-variant confidence flags (low pLDDT, terminal, exposed hydrophobic patch, metal site); pLDDT shrinkage and pLDDT-modulated cap are not shipped. Note: the trim benefit on Megascale-test is a test-set observation (treatments were fitted on abundance_dms + Domainome half), so it is reported as supporting evidence only.
