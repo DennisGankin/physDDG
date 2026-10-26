@@ -301,3 +301,18 @@ IDEAL_IC = {
           "CZ": (1.379, 119.7, 0.0), "OH": (1.377, 119.8, 180.0)},
 }
 CB_IC = IDEAL_IC["A"]["CB"]   # generic ideal CB (Gly -> X, missing CB)
+
+
+# ----------------------------------------------------------------------------- covalent bonds (heavy atoms)
+# Ring closures not implied by the IC build tree (each built atom is bonded to its third IC parent C).
+RING_CLOSURES = {"P": [("CD", "N")], "F": [("CE2", "CZ")], "Y": [("CE2", "CZ")], "H": [("CE1", "NE2")],
+                 "W": [("NE1", "CE2"), ("CZ3", "CH2")]}
+
+
+def _bonds(aa: str) -> list[tuple[str, str]]:
+    b = [("N", "CA"), ("CA", "C"), ("C", "O")] + ([("CA", "CB")] if aa != "G" else [])
+    b += [(C, atom) for atom, _, _, C, _ in IC_SPEC[aa]]
+    return b + RING_CLOSURES.get(aa, [])
+
+
+BONDS = {aa: _bonds(aa) for aa in AA1}   # intra-residue heavy-atom bonds (OXT: ("C", "OXT") when present)

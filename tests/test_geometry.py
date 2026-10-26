@@ -231,3 +231,11 @@ def test_pdbstats():
     assert s.sc_entropy()[T.AA_INDEX["R"]] > s.sc_entropy()[T.AA_INDEX["V"]] > 0
     allaa = s.rama_energy_all_aa([-63.0, -120.0], [-41.0, 130.0], next_is_pro=[False, True])
     assert allaa.shape == (2, 20) and np.isfinite(allaa).all()
+
+
+def test_bonds():
+    rings = {"P": 1, "F": 1, "Y": 1, "H": 1, "W": 2}
+    for a, t in T.TEMPLATES.items():
+        b = T.BONDS[a]
+        assert len(b) == len(t.atoms) - 1 + rings.get(a, 0)
+        assert all(x in t.atoms and y in t.atoms for x, y in b)

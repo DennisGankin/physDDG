@@ -60,37 +60,14 @@ def term_names(p: EnergyParams | None = None) -> tuple[str, ...]:
 
 
 # ============================================================================= template tables
-_SC_BONDS = {
-    "A": [], "G": [], "C": [("CB", "SG")], "S": [("CB", "OG")],
-    "D": [("CB", "CG"), ("CG", "OD1"), ("CG", "OD2")],
-    "E": [("CB", "CG"), ("CG", "CD"), ("CD", "OE1"), ("CD", "OE2")],
-    "F": [("CB", "CG"), ("CG", "CD1"), ("CG", "CD2"), ("CD1", "CE1"), ("CD2", "CE2"), ("CE1", "CZ"), ("CE2", "CZ")],
-    "H": [("CB", "CG"), ("CG", "ND1"), ("CG", "CD2"), ("ND1", "CE1"), ("CD2", "NE2"), ("CE1", "NE2")],
-    "I": [("CB", "CG1"), ("CB", "CG2"), ("CG1", "CD1")],
-    "K": [("CB", "CG"), ("CG", "CD"), ("CD", "CE"), ("CE", "NZ")],
-    "L": [("CB", "CG"), ("CG", "CD1"), ("CG", "CD2")],
-    "M": [("CB", "CG"), ("CG", "SD"), ("SD", "CE")],
-    "N": [("CB", "CG"), ("CG", "OD1"), ("CG", "ND2")],
-    "P": [("CB", "CG"), ("CG", "CD"), ("CD", "N")],
-    "Q": [("CB", "CG"), ("CG", "CD"), ("CD", "OE1"), ("CD", "NE2")],
-    "R": [("CB", "CG"), ("CG", "CD"), ("CD", "NE"), ("NE", "CZ"), ("CZ", "NH1"), ("CZ", "NH2")],
-    "T": [("CB", "OG1"), ("CB", "CG2")],
-    "V": [("CB", "CG1"), ("CB", "CG2")],
-    "W": [("CB", "CG"), ("CG", "CD1"), ("CG", "CD2"), ("CD1", "NE1"), ("NE1", "CE2"), ("CD2", "CE2"),
-          ("CD2", "CE3"), ("CE2", "CZ2"), ("CE3", "CZ3"), ("CZ2", "CH2"), ("CZ3", "CH2")],
-    "Y": [("CB", "CG"), ("CG", "CD1"), ("CG", "CD2"), ("CD1", "CE1"), ("CD2", "CE2"), ("CE1", "CZ"), ("CE2", "CZ"),
-          ("CZ", "OH")],
-}
-
-
 def slot_names(aa: str) -> list[str]:
     names = list(topo.TEMPLATES[aa].atoms)
     return names + [""] * (OXT - len(names)) + ["OXT"]
 
 
 def residue_bonds(aa: str) -> list[tuple[str, str]]:
-    bb = [("N", "CA"), ("CA", "C"), ("C", "O"), ("C", "OXT")] + ([("CA", "CB")] if aa != "G" else [])
-    return bb + _SC_BONDS[aa]
+    """Intra-residue heavy-atom bonds incl. C-OXT (topology.BONDS, E1; formerly a private table here)."""
+    return list(topo.BONDS[aa]) + [("C", "OXT")]
 
 
 def _graph_dist(aa: str) -> np.ndarray:
