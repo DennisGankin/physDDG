@@ -25,8 +25,9 @@ Terms (see params.EnergyParams for constants):
   hb_sc_sc    same, sc-sc pairs
   hb_bb_bb    DSSP electrostatic H-bond energy (Kabsch & Sander 1983) between backbone N-H and C=O
               (amide H on the C(i-1)/CA bisector), floored at -3 kcal/mol, |i-j| >= 2
-  elec_<mode> Coulomb between formal charges (topology), modes: dh (Debye-Hückel, 0.15 M, eps 80),
-              bur (screened, burial-dependent eps_ij from 4 to 80), dd (eps = 4r); CHARMM switch 10->12 Å
+  elec_<mode> Coulomb between formal charges (topology; His neutral), modes: dh (Debye-Hückel, 0.15 M,
+              eps 80; default), bur (DH-screened with burial-dependent eps_ij from 4 (both buried) to 80),
+              dd (eps = 4r); CHARMM switch 10->12 Å
   disulf      -g(d_SG-SG) g(CB-SG-SG) g(SG-SG-CB) g(|chi_SS|) (Gaussians), for SG-SG < 3 Å
 Exclusions: pairs 1-2 and 1-3 bonds apart excluded; 1-4 pairs use CHARMM19 1-4 vdW and are scaled by w14;
 intra-residue pairs whose distance does not depend on any chi angle are excluded (rigid groups only add per-aa

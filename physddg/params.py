@@ -110,12 +110,12 @@ class EnergyParams:
     nh_len: float = 1.01
     co_len: float = 1.231
     # electrostatics (formal charges from topology)
-    elec_modes: tuple = ("dd", "dh", "bur")   # each mode is returned as its own term elec_<mode>
+    elec_modes: tuple = ("dh", "bur", "dd")   # each mode is returned as its own term elec_<mode>; dh = default (D10)
     coulomb: float = 332.0636
     eps_dd: float = 4.0            # ε = eps_dd * r
     eps_dh: float = 80.0           # Debye-Hückel: solvent dielectric ...
-    debye: float = 10.0            # ... and screening length (Å; ~0.1 M ionic strength)
-    eps_in: float = 4.0            # burial-dependent ε_ij = eps_in + (eps_out-eps_in)(1 - sqrt(b_i b_j))
+    debye: float = 7.85            # ... and Debye length (Å): 3.04/sqrt(I) at 25 °C, I = 0.15 M
+    eps_in: float = 4.0            # burial-dependent (also DH-screened) ε_ij = eps_in + (eps_out-eps_in)(1 - sqrt(b_i b_j))
     eps_out: float = 80.0
     elec_on: float = 10.0
     elec_off: float = 12.0
