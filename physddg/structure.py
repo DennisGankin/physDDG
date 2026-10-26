@@ -398,7 +398,7 @@ def cb_coords(p: Protein) -> np.ndarray:
 def smooth_cn(x, r0: float = 10.0, width: float = 1.0, exclude_self: bool = True):
     """Smooth contact number: sum_j sigmoid((r0 - d_ij) / width) over points x [N,3].
 
-    torch tensor in -> differentiable dense torch computation; numpy in -> KD-tree (cutoff r0 + 8 width)."""
+    torch tensor in -> differentiable dense torch computation; numpy in -> KD-tree (cutoff r0 + 12 width)."""
     if type(x).__module__.startswith("torch"):            # avoid importing torch for numpy callers
         import torch
         d = torch.cdist(x, x)
@@ -407,7 +407,7 @@ def smooth_cn(x, r0: float = 10.0, width: float = 1.0, exclude_self: bool = True
                             if exclude_self else 0.0)
     from scipy.spatial import cKDTree
     x = np.asarray(x, np.float64)
-    pr = cKDTree(x).query_pairs(r0 + 8 * width, output_type="ndarray")
+    pr = cKDTree(x).query_pairs(r0 + 12 * width, output_type="ndarray")
     out = np.zeros(len(x))
     if len(pr):
         w = 1.0 / (1.0 + np.exp(-(r0 - np.linalg.norm(x[pr[:, 0]] - x[pr[:, 1]], axis=-1)) / width))

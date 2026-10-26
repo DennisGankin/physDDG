@@ -25,7 +25,6 @@ Decisions are logged as D<n> (see bottom). Dates are 2026.
 ## 4. PhysDDG engine
 - [x] 4.1 Design doc v0 + independent critique (notes/critique_design_v0.md) → DESIGN v1 (D4–D10, gates G1–G7)
 - [~] 4.1b Fitting framework physddg/fit.py + baseline ladder B0–B3+ + G6 tooling (agent: fit)
-- [ ] 4.1b' Baseline ladder B0–B3 (pair lookup, RSA, hydrophobicity×burial, env statistical potential)
 - [~] 4.2 Structure prep / topology / PDB-derived rotamer library / GPU NeRF builder (agent: E1)
 - [ ] 4.3 GPU batched mutant packing
 - [~] 4.4 Energy terms on GPU (agent: E2)
