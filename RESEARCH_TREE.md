@@ -21,10 +21,10 @@ Decisions are logged as D<n> (see bottom). Dates are 2026.
 - [ ] 3.2 Baselines: FoldX 5.1 native, simple burial×hydrophobicity, substitution-matrix, RSA-only
 
 ## 4. PhysDDG engine
-- [ ] 4.1 Design doc + independent critique
-- [ ] 4.2 Structure prep / topology / rotamer library
+- [~] 4.1 Design doc (DESIGN.md v0) + independent critique (agent: critic)
+- [~] 4.2 Structure prep / topology / PDB-derived rotamer library / GPU NeRF builder (agent: E1)
 - [ ] 4.3 GPU batched mutant packing
-- [ ] 4.4 Energy terms
+- [~] 4.4 Energy terms on GPU (agent: E2)
 - [ ] 4.5 Unfolded-state / reference model
 - [ ] 4.6 Parameter fitting (few interpretable weights, grouped CV)
 
@@ -37,4 +37,5 @@ Decisions are logged as D<n> (see bottom). Dates are 2026.
 
 ## Decisions
 - D1 (10-26) Sign: ddg positive = destabilising, kcal/mol (FoldX convention); Megascale ddG_ML flipped at ingestion.
+- D3 (10-26) Rotamer library + Ramachandran/entropy statistics derived from a PISCES-culled set of the local PDB mirror (licence-free, reproducible) unless a clearly better redistributable library exists.
 - D2 (10-26) PyTorch allowed only as a GPU array/autograd library (no NN, no pretrained models) — satisfies "no deep learning" while enabling GPU speed.

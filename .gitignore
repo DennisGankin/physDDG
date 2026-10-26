@@ -6,3 +6,4 @@ data/cache/
 *.log
 results/**/*.npz
 results/**/cache/
+results/baselines/*.csv
