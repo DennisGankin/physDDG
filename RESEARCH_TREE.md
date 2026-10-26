@@ -33,7 +33,9 @@ Decisions are logged as D<n> (see bottom). Dates are 2026.
 - [~] 4.1b Fitting framework physddg/fit.py + baseline ladder B0–B3+ + G6 tooling (agent: fit)
 - [x] 4.2 Structure prep / topology / PDB-derived rotamer library (PISCES pc30 ≤1.8 Å, 9,266 chains; coverage top-20 96.6%, all 98.4% within 30°) / GPU NeRF builder (0.10 Å median rebuild RMSD, 24.5M res-rot/s) / env + Rama + entropy statistics — notes/engine_geometry.md
 - [ ] 4.3 GPU batched mutant packing
-- [~] 4.4 Energy terms on GPU (agent: E2)
+- [x] 4.4 Energy terms on GPU: 11 separate terms (LJ atr/rep, EEF1 apolar/polar, H-bond sc-bb/sc-sc/bb-bb, Debye–Hückel / buried / distance-dep elec, disulfide); DSSP H-bond P/R 0.98/0.99; 10–80k variants/s — notes/engine_energy.md
+  - [~] 4.4b Parameter provenance verification (CHARMM19 vdW, EEF1 volumes) + StatTerms wiring (agent: E2)
+- [~] 4.3' Mutation pipeline: Stage 1 Boltzmann site model in fixed env, Stage 2 mean-field neighbour repacking, features for all datasets (agent: E1)
 - [ ] 4.5 Unfolded-state / reference model
 - [ ] 4.6 Parameter fitting (few interpretable weights, grouped CV)
 
@@ -45,6 +47,7 @@ Decisions are logged as D<n> (see bottom). Dates are 2026.
 - [ ] 6.1 Profiling, GPU kernels, throughput benchmark vs FoldX
 
 ## Decisions
+- D14 (10-26) Repulsion radii scaled ×0.9 by default (raises native-χ recognition among non-clashing perturbations 28%→62%; calibrated on structures, not ΔΔG).
 - D4–D10 (10-26) see DESIGN.md v1 revisions (env statistical potential, Boltzmann averaging, symmetric site modelling, shrunk/nuisance reference energies, censoring-aware fitting, site-dependent repulsion cap, screened electrostatics).
 - D1 (10-26) Sign: ddg positive = destabilising, kcal/mol (FoldX convention); Megascale ddG_ML flipped at ingestion.
 - D3 (10-26) Rotamer library + Ramachandran/entropy statistics derived from a PISCES-culled set of the local PDB mirror (licence-free, reproducible) unless a clearly better redistributable library exists.

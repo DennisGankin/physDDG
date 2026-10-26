@@ -16,3 +16,12 @@ data/processed/megascale.parquet
 data/processed/megascale.csv.gz
 data/processed/megascale_doubles.csv.gz
 data/features/
+.venv_tmol/
+ext/
+results/tmol/*.parquet
+# competitors (scripts/70-74): work dirs, extra venvs, big prediction tables
+data/work/
+.venv_ddgun/
+results/competitors/*_domainome.csv
+results/competitors/*_megascale.csv
+results/baselines_ladder/preds_*.parquet

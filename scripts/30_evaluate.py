@@ -78,7 +78,7 @@ def main():
         entry = {"pred": f"{path}:{col}", "metrics": met, "ci95": ci}
         if name != "main":
             entry["paired_vs_main"] = E.paired_bootstrap(df, "main", name, n_boot=a.n_boot, min_n=a.min_n, **kw)  # main - this
-        if {"pair_id", "direction"} <= set(df.columns):
+        if {"pair_id", "direction"} <= set(df.columns) and df["direction"].nunique() > 1:  # s669/s461 are direct-only
             entry["antisymmetry"] = E.antisymmetry(df, name)
         if a.by:
             entry["by_group"] = {str(g): E.evaluate(d, name, min_n=a.min_n, **kw) for g, d in df.groupby(a.by)}
