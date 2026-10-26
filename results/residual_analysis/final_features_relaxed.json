@@ -1,0 +1,30 @@
+{
+ "base": [
+  "e_lj_atr",
+  "e_lj_rep",
+  "e_solv_apolar",
+  "e_solv_polar",
+  "e_hb_sc_bb",
+  "e_hb_sc_sc",
+  "e_hb_bb_bb",
+  "e_elec_dh",
+  "dTS",
+  "dprior_avg",
+  "d_env_cn_ss_bb",
+  "d_rama",
+  "d_rama_prev",
+  "bur",
+  "pro_nhhb",
+  "gly_posphi",
+  "occ_dvol_loss",
+  "ss_broken"
+ ],
+ "added": [
+  "site_scsc",
+  "scale:flag_lowplddt",
+  "site_hbsc_bur",
+  "ncap_pref",
+  "helix_dipole"
+ ],
+ "rule": "relaxed"
+}

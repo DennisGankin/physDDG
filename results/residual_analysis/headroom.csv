@@ -1,0 +1,25 @@
+part,subset,scenario,rho_prot,rho_pooled,n
+train,all,model (calibrated pred; = B5 ranking),0.6744753395144275,0.7103549471631793,215731
+train,all,+ site-mean residual (in-sample oracle),0.8462343012933305,0.8603980549723614,215731
+train,all,+ site-mean residual (leave-one-out),0.8272242325102436,0.8431523056233917,215731
+train,all,model site means + perfect within-site,0.8485965259749829,0.858509855862555,215731
+train,all,LOO site-mean of y only (literature oracle),0.6849946686695008,0.740985952227148,215721
+train,all,LOO site-mean of y + model within-site,0.8247641410528165,0.8424045217852788,215721
+train,natural,model (calibrated pred; = B5 ranking),0.6726820257371169,0.7027173166083622,145200
+train,natural,+ site-mean residual (in-sample oracle),0.8543486231655277,0.8624383480375323,145200
+train,natural,+ site-mean residual (leave-one-out),0.8354212390450901,0.8457584915383033,145200
+train,natural,model site means + perfect within-site,0.842318136299608,0.8486815919243367,145200
+train,natural,LOO site-mean of y only (literature oracle),0.7183255070259529,0.7543230830268247,145190
+train,natural,LOO site-mean of y + model within-site,0.8351640830921192,0.845493490827767,145190
+val,all,model (calibrated pred; = B5 ranking),0.7058948538768747,0.7282420858730482,27328
+val,all,+ site-mean residual (in-sample oracle),0.8541562494525148,0.8654663117210367,27328
+val,all,+ site-mean residual (leave-one-out),0.8378886783237738,0.8491618302344527,27328
+val,all,model site means + perfect within-site,0.8722519211584011,0.8712730887015666,27328
+val,all,LOO site-mean of y only (literature oracle),0.7141601664247164,0.7444421775866797,27327
+val,all,LOO site-mean of y + model within-site,0.8368585122942812,0.8485930268994616,27327
+val,natural,model (calibrated pred; = B5 ranking),0.7329245401364104,0.7394510338189729,17908
+val,natural,+ site-mean residual (in-sample oracle),0.8633738825084281,0.8775764093358994,17908
+val,natural,+ site-mean residual (leave-one-out),0.8462513691719087,0.8622895207755501,17908
+val,natural,model site means + perfect within-site,0.87388187739614,0.872800111926968,17908
+val,natural,LOO site-mean of y only (literature oracle),0.7493260804305358,0.7728219445307893,17907
+val,natural,LOO site-mean of y + model within-site,0.8471707205073686,0.8619351739881389,17907
