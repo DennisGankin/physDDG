@@ -1,0 +1,67 @@
+#!/usr/bin/env python
+"""PhysDDG command line.
+
+  physddg predict --structure X.pdb|cif [--chain A] (--mutations "A12G,L45P" | --scan-all [--sites 10-80])
+                  [--mode xtal|af] [--stage 1|2] [--weights model.json] [--gpus 0,1] [--terms] --out preds.csv
+  physddg predict --table variants.csv --gpus 0,1,2,3 --out preds.csv   (columns: structure, chain, pdb_resnum, wt, mut)
+
+ddg in kcal/mol, positive = destabilising. Stage 1 (default) = fixed environment, model B4; stage 2 = flexible
+neighbours, model B5 (recommended for AlphaFold models: --mode af implies --stage 2 unless given).
+"""
+import argparse
+import os
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="physddg")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("predict")
+    p.add_argument("--structure")
+    p.add_argument("--table", help="CSV with structure, chain, pdb_resnum, wt, mut (many structures)")
+    p.add_argument("--chain")
+    g = p.add_mutually_exclusive_group()
+    g.add_argument("--mutations", help="comma-separated, e.g. A12G,L45P or B:L45P (chain B)")
+    g.add_argument("--scan-all", action="store_true", help="all 19 substitutions at every (selected) site")
+    p.add_argument("--sites", help="with --scan-all: residue numbers/ranges, e.g. 10-80,95")
+    p.add_argument("--mode", choices=["xtal", "af"], default="xtal")
+    p.add_argument("--stage", type=int, choices=[1, 2])
+    p.add_argument("--weights")
+    p.add_argument("--gpus", default="0")
+    p.add_argument("--cpus", type=int, default=4, help="CPU preparation workers per GPU process")
+    p.add_argument("--terms", action="store_true", help="add per-term contributions (c_*)")
+    p.add_argument("--out", required=True)
+    a = ap.parse_args()
+    import pandas as pd
+    from physddg import predict as P
+    stage = a.stage or (2 if a.mode == "af" else 1)
+    gpus = [int(x) for x in a.gpus.split(",") if x != ""]
+    t0 = time.time()
+    if a.table:
+        tab = pd.read_csv(a.table, dtype={"pdb_resnum": str, "chain": str})
+        tab["mutation"] = tab.wt + tab.pdb_resnum + tab.mut
+        jobs = [(s, r.drop(columns="structure").assign(structure=s)) for s, r in tab.groupby("structure", sort=False)]
+        out = P.run_jobs(jobs, gpus, a.weights, stage, a.mode, a.cpus, a.terms)
+    else:
+        if not a.structure or not (a.mutations or a.scan_all):
+            ap.error("--structure and one of --mutations/--scan-all are required (or --table)")
+        m = P.PhysDDG(a.weights, stage, f"cuda:{gpus[0]}", a.mode)
+        prot = m.load(a.structure)
+        rows = m._rows(prot, a.structure, a.mutations, a.chain, a.scan_all, a.sites)
+        if len(gpus) > 1:
+            out = P.run_jobs(P.shard_sites(a.structure, rows, len(gpus)), gpus, a.weights, stage, a.mode, 1, a.terms)
+        else:
+            out = m.predict(a.structure, rows=rows, prot=prot, terms=a.terms)
+    out.to_csv(a.out, index=False)
+    n = len(out)
+    dt = time.time() - t0
+    print(f"{n} variants in {dt:.1f} s ({n / dt:.0f} variants/s), stage {stage}, mode {a.mode} -> {a.out}", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    os.environ.setdefault("OPENBLAS_NUM_THREADS", "4")
+    main()

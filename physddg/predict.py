@@ -283,7 +283,7 @@ class PhysDDG:
         rows["protein_id"] = Path(str(structure)).stem
         return rows
 
-    def features(self, prot, structure: str, rows: pd.DataFrame) -> pd.DataFrame:
+    def features(self, prot, structure: str, rows: pd.DataFrame, site_tab: pd.DataFrame | None = None) -> pd.DataFrame:
         """All model input columns for rows (engine + statistics + simple structure features)."""
         from . import features_simple as FS
         from .mutate import SiteScan
@@ -294,7 +294,7 @@ class PhysDDG:
         z = site_arrays(prot, idx, sc, self.stage) if len(idx) else {}
         t1 = time.time()
         eng = engine_columns(z, rows, self.stage)
-        sites = FS.site_table(str(structure))
+        sites = site_tab if site_tab is not None else FS.site_table(str(structure))
         simple = FS.variant_features(rows[KEYS + ["structure"]], sites)
         simple.index = rows.index
         df = pd.concat([rows, eng, simple[[c for c in simple.columns if c not in rows.columns and c not in eng.columns]]],
@@ -322,15 +322,17 @@ class PhysDDG:
 
     # ------------------------------------------------------------------ public API
     def predict(self, structure: str | Path, mutations=None, chain: str | None = None, scan_all: bool = False,
-                sites: str | None = None, terms: bool = False, prot=None) -> pd.DataFrame:
+                sites: str | None = None, terms: bool = False, prot=None, rows: pd.DataFrame | None = None,
+                site_tab: pd.DataFrame | None = None) -> pd.DataFrame:
         """ddG for mutations ('A12G', ...) or a saturation scan (scan_all, optional sites '10-80')."""
         t0 = time.time()
         prot = prot if prot is not None else self.load(structure, chain)
         t1 = time.time()
-        rows = self._rows(prot, structure, mutations, chain, scan_all, sites)
-        df = self.features(prot, str(structure), rows)
+        if rows is None:
+            rows = self._rows(prot, structure, mutations, chain, scan_all, sites)
+        df = self.features(prot, str(structure), rows, site_tab)
         sc = self.score(df, terms)
-        out = rows[["chain", "pdb_resnum", "wt", "mut", "mutation"]].copy()
+        out = rows[[c for c in rows.columns if c != "structure"]].copy()
         out["ddg"] = sc["ddg"]
         out["site_found"] = df["site_found"].astype(bool)
         out["wt_match"] = df["wt_match"].astype(bool)
@@ -347,3 +349,78 @@ class PhysDDG:
 
 def model_info(weights: str | Path) -> dict:
     return json.loads(Path(weights).read_text())
+
+
+# ============================================================================= multi-GPU / multi-structure runner
+def _prep(job):
+    """CPU part of a job: load + annotate + structure-statistics site table (runs in a process pool)."""
+    import os
+    for v in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+        os.environ.setdefault(v, "1")
+    from . import features_simple as FS
+    from .structure import annotate, load_protein
+    structure, rows = job
+    t = time.time()
+    try:
+        prot = annotate(load_protein(structure, keep_het=True))
+        tab = FS.site_table(str(structure))
+    except Exception as e:  # noqa: BLE001
+        return structure, rows, None, None, repr(e), time.time() - t
+    return structure, rows, prot, tab, None, time.time() - t
+
+
+def _gpu_worker(gpu: int, jobs: list, weights, stage, mode, cpus: int, terms: bool, q):
+    import os
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu)
+    from concurrent.futures import ProcessPoolExecutor
+    m = PhysDDG(weights, stage, "cuda", mode)
+    outs = []
+    with ProcessPoolExecutor(max(1, cpus)) as ex:                 # CPU prep overlapped with GPU work
+        for structure, rows, prot, tab, err, t_cpu in ex.map(_prep, jobs, chunksize=1):
+            if prot is None:
+                o = rows.drop(columns="structure").assign(ddg=np.nan, flags=f"load_failed:{err}")
+            else:
+                o = m.predict(structure, rows=rows, prot=prot, site_tab=tab, terms=terms)
+                o["gpu"], o["cpu_prep_s"], o["gpu_s"] = gpu, t_cpu, m.timing["engine_s"]
+            o["structure"] = structure
+            outs.append(o)
+    q.put(pd.concat(outs, ignore_index=True) if outs else pd.DataFrame())
+
+
+def run_jobs(jobs: list, gpus=(0,), weights=None, stage: int | None = None, mode: str = "xtal", cpus: int = 4,
+             terms: bool = False) -> pd.DataFrame:
+    """jobs: list of (structure, rows DataFrame with chain/pdb_resnum/wt/mut[/mutation/protein_id/...]).
+    One process per GPU (greedy balance by number of distinct sites), CPU preparation in a pool per GPU process."""
+    import multiprocessing as mp
+    if len(gpus) == 1 and cpus <= 0:
+        m = PhysDDG(weights, stage, f"cuda:{gpus[0]}", mode)
+        return pd.concat([m.predict(s, rows=r, terms=terms).assign(structure=s) for s, r in jobs], ignore_index=True)
+    size = [r[["chain", "pdb_resnum"]].drop_duplicates().shape[0] for _, r in jobs]
+    parts, load = [[] for _ in gpus], [0] * len(gpus)
+    for j in np.argsort(size)[::-1]:
+        k = int(np.argmin(load))
+        parts[k].append(jobs[j])
+        load[k] += size[j]
+    ctx = mp.get_context("spawn")
+    q = ctx.Queue()
+    procs = [ctx.Process(target=_gpu_worker, args=(g, pj, weights, stage, mode, cpus, terms, q))
+             for g, pj in zip(gpus, parts) if pj]
+    for pr in procs:
+        pr.start()
+    res = [q.get() for _ in procs]
+    for pr in procs:
+        pr.join()
+    return pd.concat(res, ignore_index=True)
+
+
+def shard_sites(structure, rows: pd.DataFrame, n: int) -> list:
+    """Split one structure's rows into n jobs by site (contiguous blocks of sites)."""
+    sites = rows[["chain", "pdb_resnum"]].drop_duplicates().reset_index(drop=True)
+    blocks = np.array_split(np.arange(len(sites)), n)
+    jobs = []
+    for b in blocks:
+        if len(b) == 0:
+            continue
+        keep = sites.iloc[b]
+        jobs.append((structure, rows.merge(keep, on=["chain", "pdb_resnum"])))
+    return jobs
