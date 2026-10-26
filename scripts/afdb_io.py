@@ -51,32 +51,45 @@ def read_tar_member(label, offset, size):
         return gzip.decompress(fh.read(size)).decode()
 
 
+def _curl(url, dest=None, ua=True):
+    cmd = ["curl", "-sSfL", "--retry", "5", "--retry-delay", "5"] + (["-A", UA] if ua else [])
+    if dest:
+        r = subprocess.run(cmd + ["-o", dest + ".part", url])
+        if r.returncode == 0:
+            os.replace(dest + ".part", dest)
+        elif os.path.exists(dest + ".part"):
+            os.remove(dest + ".part")
+        return r.returncode == 0
+    r = subprocess.run(cmd + [url], capture_output=True, text=True)
+    return r.stdout if r.returncode == 0 else None
+
+
 def fetch_ebi(acc):
-    """Download AF model(s) for accession from EBI AFDB (latest version). Returns list of (frag, version, pdb_text)."""
+    """Download AF model(s) for an accession from the EBI AFDB (latest version), cached in data/raw/afdb/.
+    Returns list of dict(frag, version, text, path, uniprot_start, uniprot_end).
+    Notes: alphafold.ebi.ac.uk answers 403 without a browser-like User-Agent and 429 under bursts;
+    newer AFDB entries (e.g. viral proteins) use IDs like AF-0000000365763033-model_v1 and may cover only a
+    segment of the UniProt sequence (uniprotStart..uniprotEnd)."""
     os.makedirs(RAW_AFDB, exist_ok=True)
     meta_f = os.path.join(RAW_AFDB, f"{acc}.json")
     if not os.path.exists(meta_f):
-        ok = False
-        for ua in ([], ["-A", UA]):  # the API has answered 403 intermittently with either header
-            r = subprocess.run(["curl", "-sSfL", *ua, "--retry", "3", f"https://alphafold.ebi.ac.uk/api/prediction/{acc}"],
-                               capture_output=True, text=True)
-            if r.returncode == 0 and r.stdout.strip().startswith("["):
-                open(meta_f, "w").write(r.stdout); ok = True; break
-        if not ok:
+        txt = None
+        for ua in (True, False):
+            txt = _curl(f"https://alphafold.ebi.ac.uk/api/prediction/{acc}", ua=ua)
+            if txt and txt.strip().startswith("["):
+                break
+            txt = None
+        if txt is None:
             # fall back to direct file URLs (single-fragment models, v6 then v4)
             for v in (6, 4):
                 url = f"https://alphafold.ebi.ac.uk/files/AF-{acc}-F1-model_v{v}.pdb"
                 fn = os.path.join(RAW_AFDB, os.path.basename(url))
-                if not os.path.exists(fn):
-                    rr = subprocess.run(["curl", "-sSfL", "-A", UA, "--retry", "2", "-o", fn + ".part", url])
-                    if rr.returncode != 0:
-                        if os.path.exists(fn + ".part"):
-                            os.remove(fn + ".part")
-                        continue
-                    os.replace(fn + ".part", fn)
-                return [(1, v, open(fn).read(), os.path.relpath(fn, ROOT))]
+                if os.path.exists(fn) or _curl(url, fn):
+                    return [dict(frag=1, version=v, text=open(fn).read(), path=os.path.relpath(fn, ROOT),
+                                 uniprot_start=1, uniprot_end=None)]
             print(f"EBI AFDB: no model reachable for {acc}", flush=True)
             return []
+        open(meta_f, "w").write(txt)
     try:
         meta = json.load(open(meta_f))
     except Exception:
@@ -87,15 +100,14 @@ def fetch_ebi(acc):
             continue
         url = e["pdbUrl"]
         fn = os.path.join(RAW_AFDB, os.path.basename(url))
-        if not os.path.exists(fn):
-            # NB: alphafold.ebi.ac.uk/files returns 403 without a browser-like User-Agent
-            r = subprocess.run(["curl", "-sSfL", "-A", UA, "--retry", "3", "-o", fn + ".part", url])
-            if r.returncode != 0:
-                print(f"EBI download failed for {url}", flush=True)
-                continue
-            os.replace(fn + ".part", fn)
-        mm = re.search(r"-F(\d+)-model_v(\d+)\.pdb", fn)
-        out.append((int(mm.group(1)), int(mm.group(2)), open(fn).read(), os.path.relpath(fn, ROOT)))
+        if not os.path.exists(fn) and not _curl(url, fn):
+            print(f"EBI download failed for {url}", flush=True)
+            continue
+        mf = re.search(r"-F(\d+)-model", fn)
+        mv = re.search(r"model_v(\d+)\.pdb", fn)
+        out.append(dict(frag=int(mf.group(1)) if mf else 1, version=int(mv.group(1)) if mv else -1,
+                        text=open(fn).read(), path=os.path.relpath(fn, ROOT),
+                        uniprot_start=int(e.get("uniprotStart") or 1), uniprot_end=e.get("uniprotEnd")))
     return out
 
 
@@ -114,27 +126,30 @@ def structure_seq(pdb_text):
 
 def candidates(acc, sources=("af2_tree", "v4_human_tar", "v6_human", "v6_swissprot", "v6_yeast", "v6_ecoli", "v6_mouse"), ebi=True):
     """Yield candidate models for accession in priority order:
-    dict(source, version, frag, n_frags, text, src_path)."""
-    if "af2_tree" in sources:
-        af = _af2()
-        rows = af[af.uniprot_id == acc]
-        for r in rows.itertuples():
-            p = os.path.join(AF2_DIR, r.af2_pdb)
-            if os.path.exists(p):
-                yield dict(source="v4_human_af2tree", version=4, frag=int(r.frag_id[1:]), n_frags=int(r.n_frags),
-                           text=open(p).read(), src_path=p)
-    for lab in sources:
+    dict(source, version, frag, n_frags, text, src_path, uniprot_offset); UniProt pos = model resnum + uniprot_offset."""
+    for lab in sources:  # honour the given priority order
         if lab == "af2_tree":
+            af = _af2()
+            for r in af[af.uniprot_id == acc].itertuples():
+                p = os.path.join(AF2_DIR, r.af2_pdb)
+                if os.path.exists(p):
+                    fr, nf = int(r.frag_id[1:]), int(r.n_frags)
+                    yield dict(source="v4_human_af2tree", version=4, frag=fr, n_frags=nf, text=open(p).read(), src_path=p,
+                               uniprot_offset=FRAG_STEP * (fr - 1) if nf > 1 else 0)
             continue
         ents = tar_index(lab).get(acc, [])
         nf = len(ents)
         for frag, ver, off, size, mem in sorted(ents):
             yield dict(source=lab, version=ver, frag=frag, n_frags=nf, text=read_tar_member(lab, off, size),
-                       src_path=f"{dict(TARS)[lab]}::{mem}")
+                       src_path=f"{dict(TARS)[lab]}::{mem}", uniprot_offset=FRAG_STEP * (frag - 1) if nf > 1 else 0)
     if ebi:
         ents = fetch_ebi(acc)
-        for frag, ver, text, fn in ents:
-            yield dict(source="ebi_afdb", version=ver, frag=frag, n_frags=len(ents), text=text, src_path=fn)
+        nf = len(ents)
+        for e in ents:
+            # residue numbering of EBI models starts at 1 for the modelled segment
+            off = e["uniprot_start"] - 1 if e["uniprot_start"] > 1 else (FRAG_STEP * (e["frag"] - 1) if nf > 1 else 0)
+            yield dict(source="ebi_afdb", version=e["version"], frag=e["frag"], n_frags=nf, text=e["text"],
+                       src_path=e["path"], uniprot_offset=off)
 
 
 _af2_df = None
