@@ -241,3 +241,19 @@ a float32 guard (`_float32`).
 - Speed (README table): stage-1 300-residue scan 4.8 s (was 2.9 s with B4: the new B6 site descriptors add ≈ 2 s
   of CPU per 270 residues — pure-Python loops in features_extra.site_descriptors, a candidate for vectorisation by
   its owner); Domainome 532k variants 63 s (stage 1) / 203 s (stage 2) / 207 s (AF mode) on 4 GPUs.
+
+## v5 (2026-10-26): CPU-side speed-up
+- `features_extra.site_descriptors` vectorised (batched KD-tree pair queries for contacts / H-bond partners /
+  packing counts, matrix forms for charges and aromatics, sliding windows for pLDDT, exact nearest-atom shortcut for
+  the void fraction so the 10 Å density count runs only on empty grid points); values identical to the loop version
+  (`_site_descriptors_v1`, kept as reference; tests/test_features_extra.py on 12 structures: 4 Megascale, 4 FireProt,
+  4 AF/bench, max |Δ| ≤ 1e-6, in practice 0). 269 residues: 1.47 → 0.29 s; 597 residues: 4.1 → 0.77 s.
+  `site_descriptors(path, prot=...)` reuses the already loaded model (not for trimmed/cropped copies).
+- Stage-1 300-residue scan 4.8 → 3.1 s; Domainome stage 1 63 → 56 s (4 GPUs).
+- Top CPU hot spots now (269-residue stage-1 scan, cProfile, GPU waits excluded): (1) per-site Python/launch
+  overhead in energy.env_energy/_env_terms/_core (~0.6 s tottime over 269 calls; GPU-bound kernels behind it),
+  (2) features_extra.site_descriptors 0.31 s, (3) freesasa SASA 0.06 s per annotate × 3 annotates (predict load,
+  features_simple.site_table, previously site_descriptors), (4) rotamer queries + NeRF launches in
+  mutate.site_candidates 0.32 s (incl. GPU builder), (5) features_simple.site_table + variant_features 0.21 s and
+  rotlib.rama_energy 0.08 s (20 per-aa calls). No further easy wins without changing other owners' files
+  (features_simple.site_table re-loads the structure; passing the loaded model would save ≈ 0.08 s).

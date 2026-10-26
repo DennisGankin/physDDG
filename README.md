@@ -76,22 +76,21 @@ mutant go through the same code path. The backbone is fixed.
 
 ## Speed (RTX 4090; end to end incl. loading, annotation, all features and scoring; `scripts/59_speed_benchmark.py`)
 Shipped weights (`final_stage1/2/af.json` = B6gs1 / B6g / B6gaf). Full saturation scans (19 × L variants); 1 GPU =
-in-process with the model loaded (cold CLI start ≈ 8 s); 4 GPUs = sites sharded over one process per GPU (includes
-≈ 5 s process spawn + CUDA init, so it only pays off for large proteins or stage 2).
+in-process with the model loaded (cold CLI start ≈ 3–4 s); 4 GPUs = sites sharded over one process per GPU (includes
+≈ 4–5 s process spawn + CUDA init, so it only pays off for large proteins or stage 2).
 
 | protein (residues) | variants | stage 1, 1 GPU | stage 1, 4 GPUs | stage 2, 1 GPU | stage 2, 4 GPUs | FoldX 5.1 (5–10 CPU-s/mut) | KORPM (0.44 ms/mut, 1 core) |
 |---|---|---|---|---|---|---|---|
-| 7A38 A (59) | 1,121 | **0.8 s** | 5.2 s | 2.0 s | 7.1 s | 1.6–3.1 CPU-h | 0.5 s |
-| 1ZD0 A (141) | 2,679 | **2.5 s** | 9.3 s | 4.9 s | 10.3 s | 3.7–7.4 CPU-h | 1.2 s |
-| 6Q62 A (269) | 5,111 | **4.8 s** | 9.3 s | 10.1 s | 10.4 s | 7–14 CPU-h | 2.2 s |
-| 3EDF A (597) | 11,343 | **13.1 s** | 13.5 s | 26.5 s | 17.0 s | 16–32 CPU-h | 5.0 s |
+| 7A38 A (59) | 1,121 | **0.6 s** | 4.6 s | 1.8 s | 5.4 s | 1.6–3.1 CPU-h | 0.5 s |
+| 1ZD0 A (141) | 2,679 | **1.5 s** | 5.5 s | 3.9 s | 8.2 s | 3.7–7.4 CPU-h | 1.2 s |
+| 6Q62 A (269) | 5,111 | **3.1 s** | 6.0 s | 7.5 s | 8.8 s | 7–14 CPU-h | 2.2 s |
+| 3EDF A (597) | 11,343 | **8.3 s** | 7.9 s | 21.2 s | 12.6 s | 16–32 CPU-h | 5.0 s |
 
-AF mode (crop/trim + stage 2 + attenuation + flags), 1 GPU, AlphaFold DB yeast models: 150 res 11.2 s, 298 res 23.9 s,
-603 res 42.7 s (≈ 240–270 variants/s; trimming re-annotates the model and scores trimmed sites on the untrimmed one).
-Stage 1 time is about half CPU (the B6 site descriptors of `physddg/features_extra.py`, ≈ 2 s per 270 residues,
-pure-Python loops) and half GPU (engine). Whole tables on 4 GPUs (one process per GPU, CPU preparation overlapped):
-Megascale-test 28,172 variants: stage 1 23.5 s, stage 2 19.9 s; Domainome 532,501 variants: stage 1 **63 s**
-(8,450/s), stage 2 203 s, AF mode 207 s. Target (300-residue saturation scan < 1 min on one 4090, stage 1) met.
+AF mode (crop/trim + stage 2 + attenuation + flags), 1 GPU, AlphaFold DB yeast models: 150 res 4.7 s, 298 res 11.2 s,
+603 res 22.2 s. Stage 1 is ≈ 80% GPU (engine) and 20% CPU (0.5 s of 3.1 s at 269 residues: B6 site descriptors
+0.3 s after vectorisation (was 2 s), freesasa, structure-statistics tables). Whole tables on 4 GPUs (one process per
+GPU, CPU preparation overlapped): Megascale-test 28,172 variants: stage 1 8.8 s, stage 2 15.9 s; Domainome 532,501
+variants: stage 1 **56 s** (9,590/s), stage 2 171 s, AF mode 199 s. Target (300-residue scan < 1 min, stage 1) met ~20×.
 
 Example outputs (`--scan-all --terms`): `results/examples/1PSE_megascale_scan_stage1.csv` (crystal/Megascale domain,
 stage 1), `results/examples/AF-A0A2R8Y422_PF00240_crop2-71_scan_af.csv` (AF model cropped to the Domainome
