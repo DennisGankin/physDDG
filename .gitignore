@@ -31,3 +31,5 @@ results/ladder_physics/preds_*.parquet
 # residual analysis (scripts/90-94): large regenerable tables
 results/residual_analysis/*.parquet
 results/residual_analysis/*.pkl
+# evo extension (scripts/10a-10d): large regenerable predictions
+results/evo_extension/*.parquet

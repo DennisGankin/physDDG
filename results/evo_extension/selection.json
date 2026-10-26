@@ -1,0 +1,8 @@
+{
+ "set": "lor",
+ "features": [
+  "evo_lor"
+ ],
+ "gate": "none",
+ "rule": "score = d val_nat + d cv_nat vs B5; folds_up >= 4; within 0.003 -> fewer weights; gate ties -> apriori"
+}

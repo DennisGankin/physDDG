@@ -1,0 +1,110 @@
+{
+ "name": "Evo-only-full6",
+ "created": "2026-10-26T19:12:40",
+ "git_commit": "860d136",
+ "config": {
+  "features": [
+   "gapriori:evo_lor",
+   "gapriori:evo_entropy",
+   "gapriori:evo_gap",
+   "gapriori:evo_hyd_lor",
+   "gapriori:evo_vol_z",
+   "gapriori:evo_blprof"
+  ],
+  "ref": true,
+  "ref_prior": null,
+  "ref_l2": 0.01,
+  "ref_nuisance": [],
+  "nuis_l2": 0.001,
+  "scale_offset": true,
+  "ref_dataset": "megascale",
+  "loss": "huber",
+  "huber_delta": 1.0,
+  "censor": true,
+  "rank_weight": 0.0,
+  "rank_margin": 0.5,
+  "rank_pairs": 1000,
+  "rank_tau": 0.5,
+  "weighting": "clusters",
+  "within": "rows",
+  "signs": {
+   "gapriori:evo_lor": -1,
+   "gapriori:evo_entropy": -1,
+   "gapriori:evo_gap": -1,
+   "gapriori:evo_hyd_lor": -1,
+   "gapriori:evo_vol_z": -1,
+   "gapriori:evo_blprof": -1
+  },
+  "l2": 1e-06,
+  "intercept": true,
+  "sym_pair": false,
+  "sym_l2": 0.01,
+  "seed": 0
+ },
+ "intercept": 0.6604122270346281,
+ "weights": {
+  "gapriori:evo_lor": -0.08049156303560404,
+  "gapriori:evo_entropy": -0.12547769912906648,
+  "gapriori:evo_gap": -0.5650620422331452,
+  "gapriori:evo_hyd_lor": -0.06970469062414135,
+  "gapriori:evo_vol_z": -0.008415173282643343,
+  "gapriori:evo_blprof": -0.09107455086137495
+ },
+ "ref": {
+  "A": -0.03778973425454331,
+  "C": -0.37199168466915516,
+  "D": 0.3289234777684235,
+  "E": 0.2988020307993956,
+  "F": -0.33609585935985486,
+  "G": 0.10909163570108918,
+  "H": 0.07439790053618164,
+  "I": -0.32585928157820765,
+  "K": 0.25929832053764984,
+  "L": -0.3269282921524917,
+  "M": -0.2245277118708695,
+  "N": 0.23519360544146403,
+  "P": 0.5358904006930565,
+  "Q": 0.18380315808453032,
+  "R": 0.11174006054499958,
+  "S": 0.17779854068179668,
+  "T": 0.10211972953344804,
+  "V": -0.23628237207725367,
+  "W": -0.31813950061756197,
+  "Y": -0.23944442374209196
+ },
+ "sym_pair": {},
+ "nuisance": {
+  "scale": {},
+  "offset": {},
+  "sigma": {},
+  "delta_ref": {}
+ },
+ "inactive_features": [],
+ "converged": true,
+ "objective": 0.3648567391688231,
+ "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+ "train": {
+  "megascale": {
+   "n_rows": 227094,
+   "n_point": 215731,
+   "n_interval": 11363,
+   "n_proteins": 239,
+   "n_clusters": 96,
+   "total_weight": 1.0000000000000002
+  }
+ },
+ "provenance": {
+  "train": "megascale train (Dataset 3 + censored)",
+  "evo": [
+   "gapriori:evo_lor",
+   "gapriori:evo_entropy",
+   "gapriori:evo_gap",
+   "gapriori:evo_hyd_lor",
+   "gapriori:evo_vol_z",
+   "gapriori:evo_blprof"
+  ],
+  "base": "Evo",
+  "evo_features": "data/features/evo_megascale.parquet (scripts/10b)",
+  "selection": "results/evo_extension/selection.csv (Megascale-val natural + train grouped CV)"
+ }
+}

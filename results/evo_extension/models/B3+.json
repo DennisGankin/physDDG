@@ -1,0 +1,106 @@
+{
+ "name": "B3+",
+ "created": "2026-10-26T19:12:26",
+ "git_commit": "860d136",
+ "config": {
+  "features": [
+   "de_env_bb",
+   "bur",
+   "de_rama",
+   "de_prepro",
+   "pro_nhhb",
+   "gly_posphi",
+   "ss_broken",
+   "cis_pro_lost",
+   "occ_dvol_gain",
+   "occ_dvol_loss"
+  ],
+  "ref": true,
+  "ref_prior": null,
+  "ref_l2": 0.01,
+  "ref_nuisance": [],
+  "nuis_l2": 0.001,
+  "scale_offset": true,
+  "ref_dataset": "megascale",
+  "loss": "huber",
+  "huber_delta": 1.0,
+  "censor": true,
+  "rank_weight": 0.0,
+  "rank_margin": 0.5,
+  "rank_pairs": 1000,
+  "rank_tau": 0.5,
+  "weighting": "clusters",
+  "within": "rows",
+  "signs": {},
+  "l2": 1e-06,
+  "intercept": true,
+  "sym_pair": false,
+  "sym_l2": 0.01,
+  "seed": 0
+ },
+ "intercept": -0.49180857335633726,
+ "weights": {
+  "de_env_bb": 0.15684758074318333,
+  "bur": 1.5608346931406047,
+  "de_rama": 0.13158844119321586,
+  "de_prepro": 0.13332958042089377,
+  "pro_nhhb": 0.8503989009693546,
+  "gly_posphi": -0.40502322586474654,
+  "ss_broken": 0.0,
+  "cis_pro_lost": 0.7487535441238318,
+  "occ_dvol_gain": -0.029041404340203657,
+  "occ_dvol_loss": 1.272119619017436
+ },
+ "ref": {
+  "A": -0.10168477053578588,
+  "C": -0.43782822384507064,
+  "D": 0.22407022710793678,
+  "E": 0.3039269858740073,
+  "F": -0.15614085833148947,
+  "G": -0.1379514164126175,
+  "H": 0.15650049343305417,
+  "I": -0.16257156358843738,
+  "K": 0.2591113846436337,
+  "L": -0.22147833843174905,
+  "M": -0.13335304269759843,
+  "N": 0.17149262278646155,
+  "P": 0.0833034822153477,
+  "Q": 0.2329681565335414,
+  "R": 0.14935511805014484,
+  "S": 0.022124732718942035,
+  "T": 0.058645565834396,
+  "V": -0.14950432473078681,
+  "W": -0.085313282105187,
+  "Y": -0.07567294851875388
+ },
+ "sym_pair": {},
+ "nuisance": {
+  "scale": {},
+  "offset": {},
+  "sigma": {},
+  "delta_ref": {}
+ },
+ "inactive_features": [
+  "ss_broken"
+ ],
+ "converged": true,
+ "objective": 0.3141810099786294,
+ "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+ "train": {
+  "megascale": {
+   "n_rows": 227094,
+   "n_point": 215731,
+   "n_interval": 11363,
+   "n_proteins": 239,
+   "n_clusters": 96,
+   "total_weight": 1.0000000000000002
+  }
+ },
+ "provenance": {
+  "train": "megascale train (Dataset 3 + censored)",
+  "evo": [],
+  "base": "B3+",
+  "evo_features": "data/features/evo_megascale.parquet (scripts/10b)",
+  "selection": "results/evo_extension/selection.csv (Megascale-val natural + train grouped CV)"
+ }
+}
