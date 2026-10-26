@@ -61,6 +61,9 @@ Decisions are logged as D<n> (see bottom). Dates are 2026.
   - Unit-weight Ssym lj_rep bias: capA +4.2 (r 0.35), capB +7.5 (r 0.29), soft column +3.2 (r 0.35); Megascale-val raw ρ capA 0.562 / capB 0.552 / capC 0.559
   - [-] Single-structure symmetrisation sym_s2_dF = ½(fz − rev): r(dir,−rev) 0.15, bias +3.5 — the modelled mutant environment stays too close to the WT crystal environment; antisymmetry cannot be obtained from one structure with a fixed-backbone model
   - [-] G3 backbone ensemble: no gain (B4 weights unrefitted: Megascale-val 0.7265 → 0.7188–0.7257; buried small→large ≤ +0.009), cost 9× Stage 1 → dropped
+- [x] 4.6b D17 re-issue (notes/ladder_physics.md; old tables in superseded appendix): CXXC out of headline; S461/S669 strict; FoldX raw+clipped; G1 fails on rank (B4−FoldX +0.048 [−0.008,+0.105]; B5 +0.058 [−0.003,+0.113]), passes Pearson (+0.100 [+0.062,+0.132] vs clipped FoldX) and RMSE (0.78 vs 1.85)
+  - [!] G2 stratum now on held-out data: buried small→large +0.058 per-protein ρ OOF (5/5 folds), +0.078 val; overall +0.004–0.005
+  - [-] Cap selection (capA/B/C × hard/soft) within noise (0.010 val, 0.004 CV): the cap is not where the error is; soft repulsion halves tail (p99 123→53) but −0.007 ρ; B4-odd (antisymmetric by dropping WT-only main effects) r 0.59 at −0.044 ρ
 - [~] 4.8 Residual analysis: where is the remaining error, candidate terms (agent: resid)
 - [x] 4.9 Independent audit (notes/audit_1.md): headline numbers recomputed from raw preds match to 4 decimals; no test labels enter fitting; no critical issues
   - [!] Over-claims corrected: (a) CXXC disulfide exception was derived from 2 FireProt-test rows (2TRX) — joint-model FP-test r falls 0.48→0.39 without it → treat as test-informed, report without; (b) S461 24.5% rows are exact Megascale-train mutations → report strict only; (c) Ssym is NOT a test for joint (FireProt-trainval) models (85.7% exact overlap); (d) G1 FAILS under D16 (B4−FoldX +0.048 [−0.008,+0.105], B5 +0.058 [−0.003,+0.113]) — only Pearson is clearly better; (e) FoldX Pearson gap is mostly its uncapped tail (clip to [−3,8], no fitting: 0.445→0.596 → gap +0.10 not +0.25) → always report FoldX-clipped too; (f) 'natural' Megascale subset not homology-clean (1TUC, 2KXD) but strict 0.687 ≈ 0.677; headline rests on 21 proteins
@@ -73,8 +76,8 @@ Decisions are logged as D<n> (see bottom). Dates are 2026.
 - [~] 5.1 Xtal vs AF paired evaluation + Domainome by pLDDT band (agent: af)
 - [~] 5.2 AF treatments: trim/neutralise low pLDDT, pLDDT-modulated cap, shell repack, shrinkage; gate G5 (agent: af)
 
-## 6. Speed
-- [ ] 6.1 Profiling, GPU kernels, throughput benchmark vs FoldX
+## 6. Speed & packaging
+- [~] 6.1 Predictor CLI/API (physddg predict), profiling, torch.compile / bf16 / multi-GPU, throughput table vs FoldX/KORPM, real WT→WT / no-native-rotamer tests, README (agent: E1)
 
 ## Decisions
 - D17 (10-26) Reporting protocol after audit: every table on identical rows; S461/S669 on strict subsets (no Megascale-train overlap); Ssym only as antisymmetry diagnostic (and never for models that touch FireProt-trainval); FoldX reported both raw and clipped to [−3,8]; Megascale headline on natural AND natural-strict AND all; no test-informed rules in headline models (CXXC exception removed from headline, shown as a separate variant); gate verdicts from paired-bootstrap CIs.
