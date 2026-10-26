@@ -1,0 +1,113 @@
+{
+ "name": "Bref",
+ "created": "2026-10-26T14:14:13",
+ "git_commit": "a02e023",
+ "config": {
+  "features": [],
+  "ref": true,
+  "ref_prior": null,
+  "ref_l2": 0.01,
+  "ref_nuisance": [],
+  "nuis_l2": 0.001,
+  "scale_offset": true,
+  "ref_dataset": "megascale",
+  "loss": "huber",
+  "huber_delta": 1.0,
+  "censor": true,
+  "rank_weight": 0.0,
+  "rank_margin": 0.5,
+  "rank_pairs": 1000,
+  "rank_tau": 0.5,
+  "weighting": "clusters",
+  "within": "rows",
+  "signs": {},
+  "l2": 1e-06,
+  "intercept": true,
+  "seed": 0
+ },
+ "intercept": 0.7733904077118005,
+ "weights": {},
+ "ref": {
+  "A": -0.030161988443819586,
+  "C": -0.2912931637792665,
+  "D": 0.2993171160964525,
+  "E": 0.3091431615876075,
+  "F": -0.33736168427029656,
+  "G": 0.06974758446935832,
+  "H": 0.09232512041970363,
+  "I": -0.331209173310277,
+  "K": 0.2756439006272232,
+  "L": -0.3802249796754422,
+  "M": -0.21299364584162028,
+  "N": 0.23256333520609915,
+  "P": 0.5137216068850627,
+  "Q": 0.1741363789650913,
+  "R": 0.10271110248215275,
+  "S": 0.15896037751673187,
+  "T": 0.12460132927387586,
+  "V": -0.24349126835292886,
+  "W": -0.2752252849120548,
+  "Y": -0.25090982494362557
+ },
+ "nuisance": {
+  "scale": {},
+  "offset": {},
+  "sigma": {},
+  "delta_ref": {}
+ },
+ "converged": true,
+ "objective": 0.420105165376027,
+ "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+ "train": {
+  "megascale": {
+   "n_rows": 227094,
+   "n_point": 215731,
+   "n_interval": 11363,
+   "n_proteins": 239,
+   "n_clusters": 96,
+   "total_weight": 1.0000000000000002
+  }
+ },
+ "provenance": {
+  "train": "megascale split==train (Dataset 3 + censored intervals)",
+  "selection": "megascale val (natural, per-protein median Spearman)",
+  "features": "data/features/simple_megascale.parquet (scripts/50_features_simple.py)",
+  "selection_options": {
+   "loss": "huber",
+   "censor": true,
+   "within": "rows",
+   "rank_weight": 0.0,
+   "ref_l2": 0.01,
+   "env": "de_env_bb"
+  }
+ },
+ "se": {
+  "intercept": 0.05143799096212903,
+  "weights": {},
+  "ref": {
+   "A": 0.03742631946273911,
+   "C": 0.02934787665416197,
+   "D": 0.026671949354962737,
+   "E": 0.029664692027744185,
+   "F": 0.038633483881710035,
+   "G": 0.03608565768962491,
+   "H": 0.015860852000563665,
+   "I": 0.017491118956204067,
+   "K": 0.020756014321681365,
+   "L": 0.037362966722639196,
+   "M": 0.014364844827695478,
+   "N": 0.022243364744150475,
+   "P": 0.04836148470911568,
+   "Q": 0.020486994972007868,
+   "R": 0.01506703802717046,
+   "S": 0.014357318825720392,
+   "T": 0.026848272388947145,
+   "V": 0.03537179802459118,
+   "W": 0.027409442549473983,
+   "Y": 0.026463553552719645
+  },
+  "n_boot": 200,
+  "unit": "cluster (stratified by dataset)"
+ },
+ "boot_weights": {}
+}

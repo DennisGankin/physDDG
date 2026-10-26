@@ -1,0 +1,8 @@
+{
+ "loss": "huber",
+ "censor": true,
+ "within": "rows",
+ "rank_weight": 0.0,
+ "ref_l2": 0.01,
+ "env": "de_env_bb"
+}
