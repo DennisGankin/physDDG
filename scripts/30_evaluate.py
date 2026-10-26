@@ -8,10 +8,13 @@ Writes results/<exp>/metrics_<bench>.json (exp = parent folder of --pred unless 
 """
 import argparse
 import json
+import os
 import sys
 import warnings
 from pathlib import Path
 
+for v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):  # BLAS thread spin is slower here
+    os.environ.setdefault(v, "1")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pandas as pd
 

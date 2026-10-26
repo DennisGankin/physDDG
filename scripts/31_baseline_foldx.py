@@ -39,9 +39,10 @@ def attach(bench: str, fx: pd.DataFrame) -> pd.DataFrame:
     for name, on in (("KEYS", keys), ("seq_pos", ["protein_id", "seq_pos", "wt", "mut"])):
         if not set(on) <= set(b):
             continue
-        m = E.merge_predictions(b, fx, "ddg_pred", keys=on, out_col="ddg_pred")
-        print(f"  join on {name}: coverage {m.attrs['merge_info']['coverage']:.1%}")
-        if m.attrs["merge_info"]["coverage"] >= 0.99:
+        m = E.merge_predictions(b, fx, "ddg_pred", keys=on, out_col="ddg_pred", quiet=True)  # FoldX lacks some splits: per-split below
+        hit = E._norm(b, keys).merge(m[keys].assign(hit=True), on=keys, how="left")["hit"].notna()
+        print(f"  join on {name}: coverage {hit.mean():.1%}" + ("; per split " + str(hit.groupby(b["split"].to_numpy()).mean().round(3).to_dict()) if "split" in b else ""))
+        if hit.mean() > 0.5:  # otherwise try the next key set (position offset / naming)
             break
     return m[[*keys, "ddg_pred"]]
 

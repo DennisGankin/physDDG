@@ -58,7 +58,7 @@ def _coverage(bench: pd.DataFrame, pred: pd.DataFrame, keys, col) -> float:
 
 
 def merge_predictions(bench: pd.DataFrame, pred: pd.DataFrame, pred_col: str = "ddg_pred", keys=KEYS,
-                      out_col: str = "pred", min_coverage: float = 0.99, shifts=range(-3, 4)) -> pd.DataFrame:
+                      out_col: str = "pred", min_coverage: float = 0.99, shifts=range(-3, 4), quiet: bool = False) -> pd.DataFrame:
     """Inner-join predictions onto benchmark rows; coverage info in result.attrs['merge_info'].
 
     Warns loudly if < min_coverage of benchmark rows get a (non-NaN) prediction, and tests
@@ -82,8 +82,9 @@ def merge_predictions(bench: pd.DataFrame, pred: pd.DataFrame, pred_col: str = "
                 info["offset"] = {"shift": best, "coverage_shifted": cov_k}
                 msg += (f" LIKELY POSITION OFFSET: shifting prediction pdb_resnum by {best:+d} gives "
                         f"{cov_k:.1%} coverage vs {cov:.1%}.")
-        print("!" * 8, msg, file=sys.stderr)
-        warnings.warn(msg)
+        if not quiet:
+            print("!" * 8, msg, file=sys.stderr)
+            warnings.warn(msg)
     p = p.rename(columns={pred_col: out_col})
     m = b.merge(p, on=list(keys), how="inner")
     m[out_col] = pd.to_numeric(m[out_col], errors="coerce")
@@ -164,7 +165,8 @@ def _pooled(y: np.ndarray, p: np.ndarray, target: str, min_pos: int = 10) -> dic
     out["rmse"] = float(np.sqrt(np.mean((p - y) ** 2)))
     out["mae"] = float(np.mean(np.abs(p - y)))
     if len(y) > 2 and np.ptp(p) > 0:  # in-sample linear recalibration y ~ a*p + b (optimistic; reported separately)
-        a, b = np.polyfit(p, y, 1)
+        a = np.cov(p, y, bias=True)[0, 1] / np.var(p)
+        b = y.mean() - a * p.mean()
         res = y - (a * p + b)
         out["rmse_fit"], out["mae_fit"] = float(np.sqrt(np.mean(res**2))), float(np.mean(np.abs(res)))
     for k, pos in (("auroc_destab", y > 1.0), ("auroc_stab", y < -0.5)):
@@ -211,7 +213,10 @@ class _Boot:
         ok = np.isfinite(y) & np.isfinite(p)
         df, self.y, self.p = df[ok], y[ok], p[ok]
         prot = df[protein_col].to_numpy()
-        grp = df[cluster_col].to_numpy() if cluster_col and cluster_col in df else prot
+        grp = prot
+        if cluster_col and cluster_col in df:  # missing/blank cluster -> the protein is its own cluster
+            c = df[cluster_col].astype(object).where(df[cluster_col].notna(), "").astype(str).to_numpy()
+            grp = np.where(c == "", prot.astype(str), np.char.add("c", c))
         self.psp = _prot_spearman(self.y, self.p, prot, min_n)
         gi = pd.Series(np.arange(len(grp))).groupby(grp, sort=False)
         self.rows = {g: ix.to_numpy() for g, ix in gi}
