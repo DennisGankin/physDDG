@@ -8,7 +8,13 @@ Decisions are logged as D<n> (see bottom). Dates are 2026.
 - [x] 0.1 Project skeleton, PROMPT.md, CONVENTIONS.md, git, venv (10-26)
 
 ## 1. Literature & landscape
-- [~] 1.1 LITERATURE.md: methods (physics, statistical, DL), datasets, benchmarks, AF-structure issues, fast packing / GPU (agent: lit)
+- [x] 1.1 LITERATURE.md (1,003 lines + notes/lit_*.md): targets table (Megascale-test ρ: FoldX 0.569, PhysDDG v1.2 0.640, ThermoMPNN 0.725, SPURS 0.74; S461 DDGun3D 0.635; Domainome FoldX 0.391, ESM-MSR 0.573)
+  - [!] 1.1a Site-only oracle (LOO site mean) = 0.757 pooled ρ on Megascale-test; site+aa additive 0.800 → per-site sensitivity is where the accuracy lives (lit agent, scripts/lit_*.py)
+  - [-] 1.1b Refitting FoldX's 22 terms under grouped CV is worse than stock FoldX (0.541 vs 0.569): reweighting FoldX-style terms is a dead end
+  - [ ] 1.1c Competitor baselines KORPM, DDGun3D on our tables (agent: competitors)
+  - [ ] 1.1d tmol (GPU Rosetta REF2015, Apache-2.0) evaluation as engine/baseline (agent: tmol)
+- D12 (10-26) Primary fit on Megascale-train only (val for selection); FireProt-train only for G6 transfer check / optional joint variant; all other sets held out.
+- D13 (10-26) AF side chains: repack only site + shell (lit evidence that AF side chains beat packers on AF backbones) — global repack only as an ablation.
 
 ## 2. Data
 - [x] 2.1 Megascale: ThermoMPNN set (train 215,731/239 · val 27,328/31 · test 28,172/28), dG/CI/censor flags, 14,656 censored singles as intervals, 162k doubles; structures are Tsuboyama's AF2 models (!)
