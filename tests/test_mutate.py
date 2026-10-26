@@ -28,7 +28,7 @@ def scan(prot):
     return SiteScan(prot, MutateConfig(), DEV)
 
 
-def test_stage1_wt_zero_deterministic_batch_independent(scan, prot):
+def test_stage1_deterministic_batch_independent(scan, prot):
     sites = np.array([3, 10, 25, 40])
     a = scan.stage1(sites)
     b = scan.stage1(sites)
@@ -36,9 +36,6 @@ def test_stage1_wt_zero_deterministic_batch_independent(scan, prot):
         assert np.array_equal(a[k], b[k]), k                        # bitwise deterministic
     c = scan.stage1(sites[1:2])                                     # same site, different batch composition
     assert np.allclose(a["F"][1], c["F"][0], atol=1e-4) and np.allclose(a["E_avg"][1], c["E_avg"][0], atol=1e-4)
-    wt = prot.aa[sites]
-    dF = a["F"] - a["F"][np.arange(len(sites)), wt][:, None]
-    assert np.all(dF[np.arange(len(sites)), wt] == 0.0)
     assert a["F"].shape == (4, 20) and a["E_avg"].shape == (4, 20, len(scan.terms))
     assert (a["n_rot"][:, T.AA_INDEX["G"]] == 1).all() and (a["n_rot"][:, T.AA_INDEX["R"]] > 5).all()
     # F <= U_min (free energy below the best state) and F >= U_min - kT ln n
@@ -125,3 +122,58 @@ def test_stage2_frozen_env_reverse(prot):
         assert np.allclose(rev, -fz, atol=1e-4)
     s2n = SiteScan(prot, MutateConfig(), DEV).stage2(sites)
     assert np.isfinite(s2n["F_env"]).all() and np.isfinite(s2n["E_env"]).all()
+
+
+
+def _perturbed(prot, res: int, shift=(0.7, -0.5, 0.4)):
+    """Copy of prot with the side-chain atoms beyond CB of residue `res` translated (backbone and CB unchanged)."""
+    import copy
+    q = copy.deepcopy(prot)
+    q.xyz14[res, 5:] = q.xyz14[res, 5:] + np.asarray(shift, np.float32)
+    return q
+
+
+@pytest.mark.parametrize("stage", [1, 2])
+def test_site_native_side_chain_not_used(prot, stage):
+    """Audit item 10: the mutated site is modelled from library rotamers only. Moving the WT side chain of the site
+    (atoms beyond CB) must not change its features, while moving a neighbour's side chain must."""
+    site = 25
+    cfg = MutateConfig()
+    run = lambda p: (SiteScan(p, cfg, DEV).stage1 if stage == 1 else SiteScan(p, cfg, DEV).stage2)(np.array([site]))
+    base = run(prot)
+    moved = run(_perturbed(prot, site))
+    # stage 1: exact code-path independence; stage 2: neighbours' fixed-environment energies are obtained as
+    # (vs whole protein) - (vs native flexible residues incl. the site), equal up to float32 rounding (~1e-5)
+    tol = 1e-6 if stage == 1 else 1e-4
+    assert np.abs(moved["F"] - base["F"]).max() <= tol
+    assert np.abs(moved["E_avg"] - base["E_avg"]).max() <= tol
+    ca = prot.xyz14[:, 1]
+    d = np.linalg.norm(ca - ca[site], axis=1)
+    nb = [j for j in np.argsort(d)[1:] if T.N_CHI[prot.seq[j]] >= 2 and not prot.missing_sc[j]][0]
+    other = run(_perturbed(prot, nb, (1.5, 1.5, 0.0)))
+    assert np.abs(other["F"] - base["F"]).max() > 1e-3
+
+
+def test_predict_api_wt_to_wt_and_reproduces_fit():
+    """Public API: WT->WT is exactly 0; predictions reproduce the fitted B4 model's stored predictions."""
+    import pandas as pd
+    from physddg.predict import PhysDDG
+    preds = Path("results/ladder_physics/preds_megascale.parquet")
+    m = PhysDDG(stage=1, device=DEV)
+    out = m.predict(PDB, ["S1S", "P2P", "E3E", "E3A"])
+    assert (out.ddg.to_numpy()[:3] == 0.0).all() and out.ddg.to_numpy()[3] != 0.0
+    assert out.wt_match.all() and out.site_found.all()
+    if preds.exists():
+        P = pd.read_parquet(preds)
+        g = P[P.protein_id == P.protein_id.iloc[0]]
+        o = m.predict(g.structure.iloc[0], [f"{c}:{w}{r}{u}" for c, w, r, u in zip(g.chain, g.wt, g.pdb_resnum, g.mut)])
+        assert np.nanmax(np.abs(o.ddg.to_numpy() - g["B4"].to_numpy())) < 1e-4
+
+
+@pytest.mark.skipif(torch.cuda.device_count() < 2, reason="needs 2 GPUs")
+def test_determinism_across_runs_and_gpus(prot):
+    sites = np.array([7, 33])
+    r = [SiteScan(prot, MutateConfig(), d).stage1(sites)["F"] for d in ("cuda:0", "cuda:0", "cuda:1")]
+    assert np.array_equal(r[0], r[1]) and np.array_equal(r[0], r[2])
+    r2 = [SiteScan(prot, MutateConfig(), d).stage2(sites)["F"] for d in ("cuda:0", "cuda:1")]
+    assert np.array_equal(r2[0], r2[1])

@@ -245,6 +245,12 @@ class PhysDDG:
 
     def __init__(self, weights: str | Path | None = None, stage: int | None = None, device: str = "cuda",
                  mode: str = "xtal", cfg=None):
+        import sys
+        import torch
+        if "physddg.fit" not in sys.modules:       # fit.py sets torch's default dtype to float64 on import: undo here
+            old = torch.get_default_dtype()
+            from . import fit  # noqa: F401
+            torch.set_default_dtype(old)
         from . import fit as FT
         self._FT = FT
         if weights is None:
