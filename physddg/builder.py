@@ -5,7 +5,9 @@ build_sidechains(bb, aa, chis) builds all side-chain heavy atoms for any mix of 
   aa   int (same aa everywhere) or LongTensor [B] / [B,R] (index into topology.AA1)
   chis [B,R,4] degrees (unused chis ignored)
 returns xyz [B,R,14,3] in topology template (atom14) order with backbone copied in (O = NaN if not given),
-and mask [B,R,14] of atoms that exist for the residue type. Geometry: topology.IDEAL_IC (per-aa CB included).
+and mask [B,R,14] of atoms that exist for the residue type. Geometry: topology.IDEAL_IC (per-aa CB included);
+optionally a given CB (cb=[B,3]) is used instead of the ideal one. Float64 recommended for validation, float32
+is fine for scoring (~1e-5 A differences).
 
 Also: ideal_cb (Gly -> X), amide_h (backbone H, bisector rule), donor_h (polar H with determined geometry).
 """
@@ -62,7 +64,9 @@ def nerf(a, b, c, bond, angle, torsion):
     return c + d0[..., None] * bc + d1[..., None] * m + d2[..., None] * n
 
 
-def build_sidechains(bb: torch.Tensor, aa, chis: torch.Tensor):
+def build_sidechains(bb: torch.Tensor, aa, chis: torch.Tensor, cb: torch.Tensor | None = None):
+    """See module docstring. cb [B,3] optional: use this CB (e.g. the native CB kept for the mutant) instead of
+    the ideal one (ignored for Gly)."""
     B, R = chis.shape[:2]
     dev, dt = chis.device, chis.dtype
     tgt, par, geo, chi_i, amask = _dev_tables(dev, dt)
@@ -84,6 +88,8 @@ def build_sidechains(bb: torch.Tensor, aa, chis: torch.Tensor):
         tor = g[..., 2] + torch.gather(chis_r, -1, chi_i[aa_t, s][..., None])[..., 0]
         pa = torch.gather(X, 2, p[..., None].expand(B, R, 3, 3))
         d = nerf(pa[:, :, 0], pa[:, :, 1], pa[:, :, 2], g[..., 0], g[..., 1], tor)
+        if s == 0 and cb is not None:                      # step 0 is CB for every non-Gly residue
+            d = torch.where((aa_t != T.AA_INDEX["G"])[..., None], cb[:, None].to(dt).expand(B, R, 3), d)
         X = X.scatter(2, tg[..., None, None].expand(B, R, 1, 3), d[:, :, None])
     xyz = X[:, :, :T.MAX_ATOMS]
     mask = amask[aa_t]

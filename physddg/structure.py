@@ -10,7 +10,7 @@ Dense layout: `xyz14[L,14,3]` / `mask14[L,14]` in topology template order (N, CA
 `oxt[L,3]` (NaN where absent). Flat per-atom arrays (`atom_*`) list present heavy atoms incl. OXT.
 
 `annotate(protein)` adds phi/psi/omega, cis flags, chain breaks, disulfides, DSSP secondary structure
-(Kabsch & Sander 1983 re-implementation: H G I E B T S, 3-state H/E/L), rSASA (freesasa, ProtOr radii,
+(Kabsch & Sander 1983 re-implementation: H G I E B T S, 3-state H/E/L), smooth CB contact number, rSASA (freesasa, ProtOr radii,
 Tien et al. 2013 theoretical max ASA), CB / centroid neighbour counts (8/10/12 A) and HSE-beta (13 A).
 """
 from __future__ import annotations
@@ -278,79 +278,76 @@ def disulfides(p: Protein, max_d: float = 2.5) -> list[tuple[int, int]]:
 
 # ----------------------------------------------------------------------------- DSSP (Kabsch & Sander 1983)
 def dssp(p: Protein) -> dict[str, np.ndarray]:
-    """8-state (H G I E B T S -) and 3-state (H E L) secondary structure, plus the H-bond energy map."""
+    """8-state (H G I E B T S -) and 3-state (H E L) secondary structure (sparse, O(L) memory).
+
+    Classic DSSP priority H > E/B > G > I > T > S; beta bulges are not merged into ladders (minor differences)."""
+    from scipy.spatial import cKDTree
     L = len(p)
     n, ca, c, o = (p.xyz14[:, k].astype(np.float64) for k in range(4))
     h = backbone_h(p, dssp_style=True)
-    o = np.where(np.isnan(o), c, o)          # missing O: no acceptor (caught by distance below)
-    br = breaks(p)
-    seg = np.cumsum(br)                       # contiguous segment id
-    d_ca = np.linalg.norm(ca[:, None] - ca[None], axis=-1)
-    cand = d_ca < 9.0
-    # E[i, j]: C=O of i accepting from N-H of j
+    seg = np.cumsum(breaks(p))                       # contiguous segment id
+    pairs = cKDTree(ca).query_pairs(9.0, output_type="ndarray")
+    pairs = np.concatenate([pairs, pairs[:, ::-1]]) if len(pairs) else np.zeros((0, 2), np.int64)
+    i, j = pairs[:, 0], pairs[:, 1]                  # C=O of i accepts from N-H of j
+    keep = np.abs(i - j) >= 2
+    i, j = i[keep], j[keep]
+    d = lambda x, y: np.linalg.norm(x[i] - y[j], axis=-1)
     with np.errstate(invalid="ignore", divide="ignore"):
-        r = lambda x, y: np.linalg.norm(x[:, None] - y[None], axis=-1)
-        E = 0.084 * 332.0 * (1 / r(o, n) + 1 / r(c, h) - 1 / r(o, h) - 1 / r(c, n))
-    E = np.where(cand & np.isfinite(E), E, 0.0)
-    E = np.maximum(E, -9.9)
-    np.fill_diagonal(E, 0.0)
+        E = 0.084 * 332.0 * (1 / d(o, n) + 1 / d(c, h) - 1 / d(o, h) - 1 / d(c, n))
+    ok = np.isfinite(E) & (E < -0.5)
+    hb_codes = np.unique(i[ok] * L + j[ok])
+
+    def HB(a_, b_):
+        a_, b_ = np.broadcast_arrays(np.asarray(a_), np.asarray(b_))
+        valid = (a_ >= 0) & (a_ < L) & (b_ >= 0) & (b_ < L)
+        return valid & np.isin(np.where(valid, a_ * L + b_, -1), hb_codes)
+
     idx = np.arange(L)
-    E[np.abs(idx[:, None] - idx[None]) < 2] = 0.0
-    hb = E < -0.5
-
-    def HB(i, j):
-        ok = (i >= 0) & (i < L) & (j >= 0) & (j < L)
-        out = np.zeros(np.broadcast(i, j).shape, bool)
-        out[ok] = hb[i[ok] if np.ndim(i) else i, j[ok] if np.ndim(j) else j]
-        return out
-
-    ss = np.full(L, "-", "U1")
     turn = {}
     for k in (3, 4, 5):
         t = np.zeros(L, bool)
         ii = idx[: max(L - k, 0)]
-        t[ii] = hb[ii, ii + k] & (seg[ii] == seg[ii + k])
+        t[ii] = HB(ii, ii + k) & (seg[ii] == seg[ii + k])
         turn[k] = t
-    # helices (priority H > E/B > G > I > T > S, classic DSSP)
     helix = {}
     for k in (4, 3, 5):
         hx = np.zeros(L, bool)
-        start = np.flatnonzero(turn[k][1:] & turn[k][:-1]) + 1
-        for s in start:
-            hx[s:s + k] = True
+        for s0 in np.flatnonzero(turn[k][1:] & turn[k][:-1]) + 1:
+            hx[s0:s0 + k] = True
         helix[k] = hx
-    # bridges
-    I, J = np.meshgrid(idx, idx, indexing="ij")
-    far = np.abs(I - J) > 2
-    par = far & ((HB(I - 1, J) & HB(J, I + 1)) | (HB(J - 1, I) & HB(I, J + 1)))
-    anti = far & ((HB(I, J) & HB(J, I)) | (HB(I - 1, J + 1) & HB(J - 1, I + 1)))
+    # bridges over candidate pairs (|i-j| > 2, CA < 9 A)
+    bi, bj = pairs[:, 0], pairs[:, 1]
+    far = np.abs(bi - bj) > 2
+    bi, bj = bi[far], bj[far]
+    par = (HB(bi - 1, bj) & HB(bj, bi + 1)) | (HB(bj - 1, bi) & HB(bi, bj + 1))
+    anti = (HB(bi, bj) & HB(bj, bi)) | (HB(bi - 1, bj + 1) & HB(bj - 1, bi + 1))
+    bridge = np.zeros(L, bool)
+    bridge[bi[par | anti]] = True
+    pc = set((bi[par] * L + bj[par]).tolist())
+    ac = set((bi[anti] * L + bj[anti]).tolist())
     ladder = np.zeros(L, bool)
-    bridge = par.any(1) | anti.any(1)
-    if L > 2:
-        par_n = np.zeros_like(par)
-        par_n[1:, 1:] |= par[:-1, :-1]
-        par_n[:-1, :-1] |= par[1:, 1:]
-        anti_n = np.zeros_like(anti)
-        anti_n[1:, :-1] |= anti[:-1, 1:]
-        anti_n[:-1, 1:] |= anti[1:, :-1]
-        ladder = (par & par_n).any(1) | (anti & anti_n).any(1)
-    # bends
+    for x, y in zip(bi[par], bj[par]):
+        if ((x - 1) * L + (y - 1)) in pc or ((x + 1) * L + (y + 1)) in pc:
+            ladder[x] = True
+    for x, y in zip(bi[anti], bj[anti]):
+        if ((x - 1) * L + (y + 1)) in ac or ((x + 1) * L + (y - 1)) in ac:
+            ladder[x] = True
     bend = np.zeros(L, bool)
     if L > 4:
         v1 = ca[2:-2] - ca[:-4]
         v2 = ca[4:] - ca[2:-2]
         cosang = np.sum(v1 * v2, -1) / (np.linalg.norm(v1, axis=-1) * np.linalg.norm(v2, axis=-1))
-        okb = (seg[:-4] == seg[4:])
-        bend[2:-2] = (np.degrees(np.arccos(np.clip(cosang, -1, 1))) > 70) & okb
+        bend[2:-2] = (np.degrees(np.arccos(np.clip(cosang, -1, 1))) > 70) & (seg[:-4] == seg[4:])
     tt = np.zeros(L, bool)
     for k in (3, 4, 5):
-        for s in np.flatnonzero(turn[k]):
-            tt[s + 1:s + k] = True
-    for mask_, ch in ((bend, "S"), (tt, "T"), (helix[5], "I"), (helix[3], "G"), (bridge, "B"),
-                      (ladder, "E"), (helix[4], "H")):
-        ss[mask_] = ch
+        for s0 in np.flatnonzero(turn[k]):
+            tt[s0 + 1:s0 + k] = True
+    ss = np.full(L, "-", "U1")
+    for m_, ch in ((bend, "S"), (tt, "T"), (helix[5], "I"), (helix[3], "G"), (bridge, "B"),
+                   (ladder, "E"), (helix[4], "H")):
+        ss[m_] = ch
     ss3 = np.where(np.isin(ss, ["H", "G", "I"]), "H", np.where(np.isin(ss, ["E", "B"]), "E", "L"))
-    return {"ss8": ss, "ss3": ss3, "hbond_energy": E.astype(np.float32)}
+    return {"ss8": ss, "ss3": ss3}
 
 
 # ----------------------------------------------------------------------------- burial descriptors
@@ -361,7 +358,7 @@ def _radius(resname: str, atom: str) -> float:
     global _CLASSIFIER
     import freesasa
     if _CLASSIFIER is None:
-        _CLASSIFIER = freesasa.Classifier.getStandardClassifier()
+        _CLASSIFIER = freesasa.Classifier()
     r = _CLASSIFIER.radius(resname, atom)
     if r <= 0:
         r = {"C": 1.88, "N": 1.64, "O": 1.42, "S": 1.77}.get(atom[0], 1.8)
@@ -398,8 +395,33 @@ def cb_coords(p: Protein) -> np.ndarray:
     return cb
 
 
+def smooth_cn(x, r0: float = 10.0, width: float = 1.0, exclude_self: bool = True):
+    """Smooth contact number: sum_j sigmoid((r0 - d_ij) / width) over points x [N,3].
+
+    torch tensor in -> differentiable dense torch computation; numpy in -> KD-tree (cutoff r0 + 8 width)."""
+    if type(x).__module__.startswith("torch"):            # avoid importing torch for numpy callers
+        import torch
+        d = torch.cdist(x, x)
+        w = torch.sigmoid((r0 - d) / width)
+        return w.sum(-1) - (torch.sigmoid(torch.tensor(r0 / width, dtype=x.dtype, device=x.device))
+                            if exclude_self else 0.0)
+    from scipy.spatial import cKDTree
+    x = np.asarray(x, np.float64)
+    pr = cKDTree(x).query_pairs(r0 + 8 * width, output_type="ndarray")
+    out = np.zeros(len(x))
+    if len(pr):
+        w = 1.0 / (1.0 + np.exp(-(r0 - np.linalg.norm(x[pr[:, 0]] - x[pr[:, 1]], axis=-1)) / width))
+        np.add.at(out, pr[:, 0], w)
+        np.add.at(out, pr[:, 1], w)
+    if not exclude_self:
+        out += 1.0 / (1.0 + np.exp(-r0 / width))
+    return out.astype(np.float32)
+
+
 def burial(p: Protein, radii=(8.0, 10.0, 12.0), hse_r: float = 13.0) -> dict[str, np.ndarray]:
-    """CB and side-chain-centroid neighbour counts within radii; half-sphere exposure (HSE-beta, CA-CB vector)."""
+    """CB and side-chain-centroid neighbour counts within radii, smooth CB contact number (10 A, width 1 A),
+    and half-sphere exposure (HSE-beta: CA neighbours within 13 A in the CA->CB half-sphere = up)."""
+    from scipy.spatial import cKDTree
     cb = cb_coords(p)
     ca = p.xyz14[:, 1]
     sc = np.where(p.mask14[:, 4:, None], p.xyz14[:, 4:], 0.0)
@@ -407,18 +429,23 @@ def burial(p: Protein, radii=(8.0, 10.0, 12.0), hse_r: float = 13.0) -> dict[str
     cen = np.where(cnt > 0, sc.sum(1) / np.maximum(cnt, 1), ca)
     out = {}
     for name, x in (("cb", cb), ("cen", cen)):
-        d = np.linalg.norm(x[:, None] - x[None], axis=-1)
-        np.fill_diagonal(d, np.inf)
+        tree = cKDTree(x)
         for r in radii:
-            out[f"n{name}{int(r)}"] = (d < r).sum(1).astype(np.int32)
+            out[f"n{name}{int(r)}"] = (np.array([len(v) for v in tree.query_ball_point(x, r)]) - 1).astype(np.int32)
+    out["cn"] = smooth_cn(cb)
     u = cb - ca
     u /= np.linalg.norm(u, axis=-1, keepdims=True)
-    v = ca[None] - ca[:, None]                         # [i,j] vector CA_i -> CA_j
-    dd = np.linalg.norm(v, axis=-1)
-    within = (dd < hse_r) & (dd > 0)
-    up = np.einsum("ijk,ik->ij", v, u) > 0
-    out["hse_up"] = (within & up).sum(1).astype(np.int32)
-    out["hse_down"] = (within & ~up).sum(1).astype(np.int32)
+    pr = cKDTree(ca).query_pairs(hse_r, output_type="ndarray")
+    up = np.zeros(len(p), np.int32)
+    down = np.zeros(len(p), np.int32)
+    if len(pr):
+        a_, b_ = pr[:, 0], pr[:, 1]
+        v = ca[b_] - ca[a_]
+        ua = np.sum(v * u[a_], -1) > 0           # b in a's upper half-sphere
+        ub = np.sum(-v * u[b_], -1) > 0
+        np.add.at(up, a_, ua); np.add.at(down, a_, ~ua)
+        np.add.at(up, b_, ub); np.add.at(down, b_, ~ub)
+    out["hse_up"], out["hse_down"] = up, down
     return out
 
 
@@ -426,7 +453,7 @@ def annotate(p: Protein, do_sasa: bool = True) -> Protein:
     """Fill p.ann with backbone dihedrals, chis, SS, disulfides and burial descriptors."""
     p.ann.update(backbone_dihedrals(p))
     p.ann["chi"] = side_chain_chis(p)
-    p.ann.update({k: v for k, v in dssp(p).items() if k != "hbond_energy"})
+    p.ann.update(dssp(p))
     p.ann["disulfides"] = disulfides(p)
     p.ann.update(burial(p))
     if do_sasa:
