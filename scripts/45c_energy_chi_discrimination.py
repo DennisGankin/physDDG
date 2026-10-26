@@ -120,7 +120,8 @@ if __name__ == "__main__":
         if len(files) >= 30:
             break
     settings = {"default": EnergyParams(), "w14=0": EnergyParams(w14=0.0), "w14=1": EnergyParams(w14=1.0),
-                "cap=1": EnergyParams(rep_cap=1.0), "cap=10": EnergyParams(rep_cap=10.0)}
+                "cap=1": EnergyParams(rep_cap=1.0), "cap=10": EnergyParams(rep_cap=10.0),
+                "rep_scale=0.9": EnergyParams(rep_scale=0.9), "rep_scale=0.8": EnergyParams(rep_scale=0.8)}
     summ = []
     for tag, prm in settings.items():
         df = run(prm, files)
