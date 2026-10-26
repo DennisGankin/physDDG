@@ -25,6 +25,7 @@ from joblib import Parallel, delayed  # noqa: E402
 from scipy.stats import spearmanr  # noqa: E402
 
 from physddg import eval as E  # noqa: E402
+from physddg import features_extra as X  # noqa: E402
 from physddg import fit as FT  # noqa: E402
 
 _spec = importlib.util.spec_from_file_location("ladder51", Path(__file__).with_name("51_baseline_ladder.py"))
@@ -38,15 +39,23 @@ KEYS = list(E.KEYS)
 KS = KEYS + ["structure"]
 TERMS = ["lj_atr", "lj_rep", "solv_apolar", "solv_polar", "hb_sc_bb", "hb_sc_sc", "hb_bb_bb", "ELEC", "disulf"]
 STAT = ["d_env_cn_ss_bb", "d_rama", "d_rama_prev"]
+# B6 additions (residual analysis, notes/residual_analysis.md). site_scsc / site_hbsc_bur are WT-site main
+# effects; ncap_pref (PDB-derived N-cap potential, scripts/53) and helix_dipole are state-function differences.
+# site_hbsc_bur fails the G6 3x rule (FireProt/Megascale scaled ratio 0.25, undetermined on FireProt) and is
+# therefore NOT in the headline B6; kept as the reported variant B6hb.
+B6_XTAL = ["site_scsc", "ncap_pref", "helix_dipole"]
+B6_HB = B6_XTAL + ["site_hbsc_bur"]
+B6_D15 = ["scsc_dvol", "ncap_pref", "helix_dipole"]                    # D15-compliant variant
 B3P_BASE = ["bur", "pro_nhhb", "gly_posphi", "occ_dvol_loss"]   # B3+ after G6 pruning (no cis-Pro, no dV+)
 # D17: the headline models use the plain disulfide indicator. `ss_broken_nc` (catalytic-CXXC exception) is a
 # separate reported variant because the exception was derived from two FireProt-TEST rows (audit item 1).
 SS_FEAT = {False: "ss_broken", True: "ss_broken_nc"}
 # physics sign constraints: every dE term and the rotamer prior destabilise when they increase; -T dS lowers F
-POS = {"lj_atr", "lj_rep", "lj_rep_pro", "solv_apolar", "solv_polar", "hb_sc_bb", "hb_sc_sc", "hb_bb_bb", "elec_dh",
+POS = {"site_scsc", "site_hbsc_bur", "ncap_pref", "helix_dipole", "scsc_dvol", "hbsc_dpolar",
+       "lj_atr", "lj_rep", "lj_rep_pro", "solv_apolar", "solv_polar", "hb_sc_bb", "hb_sc_sc", "hb_bb_bb", "elec_dh",
        "elec_bur", "elec_dd", "disulf", "dprior_avg", "dF", "d_env_cn_ss_bb", "d_rama", "d_rama_prev", "bur",
        "pro_nhhb", "occ_dvol_loss", "ss_broken", "ss_broken_nc"}
-NEG = {"dTS"}
+NEG = {"dTS", "scale_lowplddt", "scale_burial"}   # attenuation terms must reduce |prediction|
 
 
 # ----------------------------------------------------------------------------- features
@@ -73,6 +82,20 @@ def add_phys(df: pd.DataFrame, name: str, cap: str = "") -> pd.DataFrame:
             out = out.merge(q, on=KS, how="left")
     assert len(out) == len(df)
     return out
+
+
+def add_extra(df: pd.DataFrame, name: str) -> pd.DataFrame:
+    """Merge physddg.features_extra site descriptors (cached per dataset) and the candidate per-variant terms."""
+    st = X.site_table(df.structure.unique(), name).drop(columns=["structure_abs"]).add_prefix("x_").rename(
+        columns={"x_structure": "structure", "x_chain": "chain", "x_pdb_resnum": "pdb_resnum"})
+    d = df.assign(pdb_resnum=df.pdb_resnum.astype(str), chain=df.chain.astype(str))
+    n0 = len(d)
+    d = d.merge(st, on=["structure", "chain", "pdb_resnum"], how="left")
+    assert len(d) == n0, (len(d), n0)
+    assert "dvol" in d, "add_extra needs the simple features (dvol) merged first"
+    cand = X.candidate_features(d)
+    keep = [c for c in cand.columns if c not in d.columns]
+    return pd.concat([d, cand[keep]], axis=1)
 
 
 def cxxc_flags(df: pd.DataFrame) -> pd.Series:
@@ -143,7 +166,9 @@ def feature_set(kind: str, opts: dict) -> tuple[list, dict]:
     """kind -> (features, extra FitConfig kwargs). opts['cxxc'] picks the disulfide indicator (D17)."""
     en, refp = energy_cols(opts), (["dref_apolar", "dref_polar"] if opts.get("drefp", True) else [])
     B3P = B3P_BASE + [SS_FEAT[bool(opts.get("cxxc", False))]]
-    sets = {"full": en + STAT + B3P + refp, "noenv": en + STAT[1:] + B3P + refp, "phys": en + refp,
+    sets = {"b6": en + STAT + B3P + B6_XTAL + refp, "b6hb": en + STAT + B3P + B6_HB + refp,
+            "b6d15": en + STAT + B3P + B6_D15 + refp,
+            "full": en + STAT + B3P + refp, "noenv": en + STAT[1:] + B3P + refp, "phys": en + refp,
             "dF": ["dF"] + refp, "odd": en + STAT + refp, "odd_sym": en + STAT + refp}
     extra = {"odd": {"intercept": False}, "odd_sym": {"intercept": False, "sym_pair": True}}.get(kind, {})
     return sets[kind], extra
@@ -176,9 +201,9 @@ def train_tables(cap: str = ""):
         _CACHE["cap"] = cap
     if "train" not in _CACHE:
         cap = _CACHE.get("cap", "")
-        tr = add_phys(L.megascale_train_table("train"), "megascale", cap)
-        va = add_phys(L.megascale_train_table("val"), "megascale", cap)
-        fp = add_phys(L.fireprot_train_table(), "fireprot", cap)
+        tr = add_extra(add_phys(L.megascale_train_table("train"), "megascale", cap), "megascale")
+        va = add_extra(add_phys(L.megascale_train_table("val"), "megascale", cap), "megascale")
+        fp = add_extra(add_phys(L.fireprot_train_table(), "fireprot", cap), "fireprot")
         keep = KS + ["y", "lo", "hi", "sigma_meas", "dataset", "cluster", "domain_origin", "ddg", "cxxc", "rsa", "dvol",
                      "bur", "pro_nhhb", "gly_posphi", "occ_dvol_loss", "ss_broken"]
         out = []
@@ -186,7 +211,8 @@ def train_tables(cap: str = ""):
             d["cxxc"] = cxxc_flags(d)
             if "domain_origin" not in d:
                 d["domain_origin"] = "natural"
-            ph = [c for c in d.columns if c.startswith(("s1_", "s2_", "d_"))]
+            ph = [c for c in d.columns if c.startswith(("s1_", "s2_", "d_", "x_"))
+                  or c in set(B6_HB + B6_D15 + ["hbsc_dpolar", "flag_lowplddt", "flag_buried"])]
             out.append(d[[c for c in keep if c in d] + ph].reset_index(drop=True))
         _CACHE["train"] = tuple(out)
     return _CACHE["train"]
@@ -315,7 +341,13 @@ def stage_ablate():
 
 # ----------------------------------------------------------------------------- stage: fit
 EVAL_CAP = "capC"          # cap variant whose columns are merged at evaluation time (selected on train/val)
-MODELS = {  # name -> (stage, kind, joint); "+C" = catalytic-CXXC disulfide exception (test-informed, D17)
+# name -> (stage, kind, joint[, attenuation]); "+C" = catalytic-CXXC exception (test-informed, D17);
+# "af" models carry the pLDDT attenuation and are only meaningful where B-factors are pLDDT (AF/AF2 models).
+ATTEN = {"B6af": "plddt", "B6af_s1": "plddt"}
+MODELS = {
+    "B6s1": (1, "b6", False), "B6": (2, "b6", False), "B6hb": (2, "b6hb", False),
+    "B6d15": (2, "b6d15", False), "B6j": (2, "b6", True),
+    "B6af_s1": (1, "b6", False), "B6af": (2, "b6", False),
     "B4-capC": (1, "full", False), "B4-capC-soft": (1, "full", False),
     "B4j+C": (1, "full", True), "B5j+C": (2, "full", True),
     "B4": (1, "full", False), "B4-noenv": (1, "noenv", False), "B4-phys": (1, "phys", False), "B4-dF": (1, "dF", False),
@@ -342,10 +374,15 @@ def stage_fit(n_boot):
         if joint:
             d = pd.concat([d, derive(fp, stage, o, caps)], ignore_index=True)
             cfg.ref_nuisance = ("megascale",)
-        m = FT.fit(d, cfg, n_boot=n_boot if kind in ("full", "noenv", "phys") else 0, n_jobs=32, name=name,
-                   provenance={"train": "megascale train (Dataset 3 + censored)" + (" + fireprot train" if joint else ""),
-                               "features": f"data/features/phys_s{stage}_*.parquet + simple_*", "opts": o, "caps": caps,
-                               "selection": "results/ladder_physics/selection.csv (Megascale-val natural + train grouped CV)"})
+        prov = {"train": "megascale train (Dataset 3 + censored)" + (" + fireprot train" if joint else ""),
+                "features": f"data/features/phys_s{stage}_*.parquet + simple_* + extra_sites_* (features_extra)",
+                "opts": o, "caps": caps,
+                "selection": "results/ladder_physics/selection.csv + b6_selection.csv (Megascale-val natural + train grouped CV)"}
+        nb = n_boot if kind in ("full", "noenv", "phys", "b6", "b6hb", "b6d15") else 0
+        if name in ATTEN:
+            m = fit_attenuated(d, cfg, ATTEN[name], n_boot=nb, name=name, provenance=prov)
+        else:
+            m = FT.fit(d, cfg, n_boot=nb, n_jobs=32, name=name, provenance=prov)
         m["derive_opts"], m["stage"], m["cxxc_exception"] = o, stage, bool(o.get("cxxc"))
         FT.save_model(m, OUT / "models" / f"{name}.json")
         se = m.get("se", {}).get("weights", {})
@@ -368,7 +405,7 @@ def predict_models(models, df) -> pd.DataFrame:
         key = (m["stage"], json.dumps(m["derive_opts"], sort_keys=True))
         if key not in cache:
             cache[key] = derive(df, m["stage"], m["derive_opts"], m["provenance"].get("caps"))
-        out[name] = FT.predict(m, cache[key])
+        out[name] = predict_attenuated(m, cache[key]) if m.get("scale_kind") else FT.predict(m, cache[key])
     return out
 
 
@@ -433,6 +470,7 @@ SUBSETS = dict(L.SUBSETS)
 SUBSETS["s461"] = {"strict": SUBSETS["s461"]["strict"]}
 SUBSETS["s669"] = {"strict": SUBSETS["s669"]["strict"]}
 SUBSETS["domainome"] = {"all": "", "plddt70": "plddt>=70", "strict": "homolog_in_megascale_train==0",
+                        "flag_kept": "plddt>=70,x_dist_term>=3",
                         "plddt<50": "plddt<50", "plddt50-70": "plddt>=50,plddt<70", "plddt70-90": "plddt>=70,plddt<90",
                         "plddt>=90": "plddt>=90"}
 SUBSETS.pop("s2648", None)
@@ -468,11 +506,11 @@ def _eval_task(bench, sub, model, df, n_boot, comps, rows_tag="own"):
 
 def stage_eval(n_boot=1000):
     models = load_models()
-    mains = ["B4", "B5"]
     comps = ["FoldX", "FoldX-clip", "B3+", "tmol-refit", "KORPM", "DDGun3D"]
+    mains = ["B4", "B5", "B6", "B6s1", "B6af"]
     tasks, cov, strata_rows, stab_rows = [], [], [], []
     for bench, subs in SUBSETS.items():
-        b = add_phys(L.bench_table(bench), bench, EVAL_CAP)
+        b = add_extra(add_phys(L.bench_table(bench), bench, EVAL_CAP), bench)
         b["cxxc"] = cxxc_flags(b)
         P = predict_models(models, b)
         b = attach_competitors(pd.concat([b, P], axis=1), bench)
@@ -534,9 +572,10 @@ def stage_eval(n_boot=1000):
 def paired_af(models):
     p = pd.read_csv(L.PROC / "paired_af.csv", low_memory=False)
     p = p[p.usable.astype(bool) & ~p.af_is_mutant_state.fillna(False).astype(bool)].reset_index(drop=True)
-    af = add_phys(L.with_feats(p[KS].copy(), "paired_af"), "paired_af", EVAL_CAP)
-    xt = add_phys(L.with_feats(p.assign(structure=p.xtal_structure, chain=p.xtal_chain, pdb_resnum=p.xtal_resnum)[KS],
-                               "paired_af_xtal"), "paired_af_xtal", EVAL_CAP)
+    af = add_extra(add_phys(L.with_feats(p[KS].copy(), "paired_af"), "paired_af", EVAL_CAP), "paired_af")
+    xt = add_extra(add_phys(L.with_feats(p.assign(structure=p.xtal_structure, chain=p.xtal_chain,
+                                                  pdb_resnum=p.xtal_resnum)[KS], "paired_af_xtal"),
+                            "paired_af_xtal", EVAL_CAP), "paired_af_xtal")
     for d in (af, xt):
         d["cxxc"] = cxxc_flags(d)
     pa, px = predict_models(models, af), predict_models(models, xt)
@@ -559,7 +598,7 @@ def paired_af(models):
 # ----------------------------------------------------------------------------- stage: antisymmetry (Ssym, diagnostic only)
 def stage_antisym():
     models = load_models()
-    b = add_phys(L.bench_table("ssym"), "ssym", EVAL_CAP)
+    b = add_extra(add_phys(L.bench_table("ssym"), "ssym", EVAL_CAP), "ssym")
     b["cxxc"] = cxxc_flags(b)
     b = attach_competitors(pd.concat([b, predict_models(models, b)], axis=1), "ssym")
     b["raw_s1_dF"], b["raw_s2_dF"] = b["s1_dF"], b["s2_dF"]
@@ -592,12 +631,12 @@ def stage_antisym():
 
 # ----------------------------------------------------------------------------- stage: transfer (G6)
 def stage_transfer(n_boot):
-    tr, _, fp = train_tables()
+    tr, _, fp = train_tables(EVAL_CAP)
     sel = load_sel()
-    for name, stage in (("B4", 1), ("B5", 2)):
-        o = sel[f"opts_s{stage}"]
+    for name, stage, kind in (("B4", 1, "full"), ("B5", 2, "full"), ("B6s1", 1, "b6"), ("B6", 2, "b6")):
+        o = dict(sel[f"opts_s{stage}"], cxxc=False)
         caps = clip_caps(tr, stage, o) if o["transform"] == "clip_pct" else None
-        feats, extra = feature_set("full", o)
+        feats, extra = feature_set(kind, o)
         fits = {src: FT.fit(derive(d, stage, o, caps), make_cfg(feats, sel, extra), n_boot=n_boot, n_jobs=32, name=f"{name}_{src}")
                 for src, d in (("megascale", tr), ("fireprot", fp))}
         rows = []
@@ -612,9 +651,99 @@ def stage_transfer(n_boot):
                          "z_diff": (wb - wa) / np.sqrt(sa ** 2 + sb ** 2) if sa + sb > 0 else np.nan})
         ra, rb = np.array(list(fits["megascale"]["ref"].values())), np.array(list(fits["fireprot"]["ref"].values()))
         rows.append({"feature": "ref_energy_pearson", "w_fireprot": float(np.corrcoef(ra, rb)[0, 1])})
+        for src, d in (("megascale", tr), ("fireprot", fp)):    # sign-free refit: does the data prefer the sign?
+            mu = FT.fit(derive(d, stage, o, caps), make_cfg(feats, sel, extra, constrained=False))
+            for f in feats:
+                rows.append({"feature": f"{f} [unconstrained]", ("w_megascale" if src == "megascale" else "w_fireprot"):
+                             mu["weights"][f]})
         t = pd.DataFrame(rows)
         t.to_csv(OUT / f"transfer_{name}.csv", index=False)
         print(f"== transfer {name}\n", t.round(3).to_string(index=False))
+
+
+# ----------------------------------------------------------------------------- stage: B6 selection (train/val)
+def stage_b6():
+    """Add the residual-analysis terms one at a time to B5/B4 and check the gains survive the corrected
+    N-cap scale. Selection data only: Megascale-val (natural ρ_prot) + grouped 5-fold CV on train."""
+    tr, va, _ = train_tables(EVAL_CAP)
+    sel = load_sel()
+    rows = []
+    for stage in (1, 2):
+        o = dict(sel[f"opts_s{stage}"], cxxc=False)
+        trd, vad = derive(tr, stage, o), derive(va, stage, o)
+        base, extra = feature_set("full", o)
+        sets = {"base (B4/B5)": base, "+site_scsc": base + ["site_scsc"], "+ncap_pref": base + ["ncap_pref"],
+                "+helix_dipole": base + ["helix_dipole"], "+site_hbsc_bur": base + ["site_hbsc_bur"],
+                "B6 (4 terms)": base + B6_XTAL, "B6-D15 (state-function variant)": base + B6_D15,
+                "B6 minus site_scsc": base + [f for f in B6_XTAL if f != "site_scsc"]}
+        for lab, feats in sets.items():
+            cfg = make_cfg(feats, sel, extra)
+            m = FT.fit(trd, cfg)
+            r = {"stage": stage, "model": lab, "n_feat": len(feats), **val_metrics(m, vad)}
+            oof = FT.cross_validate(trd, cfg, k=5)
+            r["cv_natural_prot"] = FT.cv_metrics(oof[oof.domain_origin == "natural"], by_fold=False)["spearman_prot_median"]
+            r["cv_all_prot"] = FT.cv_metrics(oof, by_fold=False)["spearman_prot_median"]
+            rows.append(r)
+            print({k: (round(v, 4) if isinstance(v, float) else v) for k, v in r.items()}, flush=True)
+        # attenuation + its burial-matched control (notes/af_mode.md section 4)
+        cfg6 = make_cfg(base + B6_XTAL, sel, extra)
+        for kind in ("plddt", "burial"):
+            oof = cv_attenuated(trd, cfg6, kind, k=5)
+            m = fit_attenuated(trd, cfg6, kind)
+            v = vad.assign(ddg=vad.y, pred=predict_attenuated(m, vad))
+            vn = v[(v.domain_origin == "natural") & v.ddg.notna()]
+            r = {"stage": stage, "model": f"B6 + {kind} attenuation", "n_feat": len(base + B6_XTAL) + 1,
+                 "val_natural_prot": E.evaluate(vn, "pred")["spearman_prot_median"],
+                 "val_all_prot": E.evaluate(v[v.ddg.notna()], "pred")["spearman_prot_median"],
+                 "cv_natural_prot": FT.cv_metrics(oof[oof.domain_origin == "natural"], by_fold=False)["spearman_prot_median"],
+                 "cv_all_prot": FT.cv_metrics(oof, by_fold=False)["spearman_prot_median"],
+                 "atten_weight": m["weights"][f"scale_{kind}"]}
+            rows.append(r)
+            print({k: (round(v_, 4) if isinstance(v_, float) else v_) for k, v_ in r.items()}, flush=True)
+    t = pd.DataFrame(rows)
+    t.to_csv(OUT / "b6_selection.csv", index=False)
+    print(t.round(4).to_string(index=False))
+
+
+# ----------------------------------------------------------------------------- attenuation (AF mode) fits
+def _atten_col(d: pd.DataFrame, kind: str) -> np.ndarray:
+    """Attenuation strength f in [0,1]. 'plddt': 1 - pLDDT/100 (AF models only; crystal/design -> 0).
+    'burial': 1 - RSA, the burial-matched control the AF study asks for (notes/af_mode.md section 4)."""
+    if kind == "plddt":
+        return d["flag_lowplddt"].to_numpy(float)
+    return (1.0 - d["x_rsa"].clip(0, 1)).to_numpy(float)
+
+
+def fit_attenuated(train: pd.DataFrame, cfg: FT.FitConfig, kind: str, n_boot: int = 0, name: str = "B6af",
+                   provenance: dict | None = None) -> dict:
+    """Two-stage fit: core model, then core x f added as one extra (negatively constrained) weight, so the
+    prediction is core*(1 - a*f) + ... . The core model is stored in the JSON as `scale_base` so that inference
+    can recompute it (schema note for E1 in notes/engine_mutate.md)."""
+    base = FT.fit(train, cfg)
+    col = f"scale_{kind}"
+    d = train.assign(**{col: FT.predict(base, train) * _atten_col(train, kind)})
+    cfg2 = FT.FitConfig(**{**{k: v for k, v in cfg.__dict__.items()}, "features": list(cfg.features) + [col],
+                           "signs": {**cfg.signs, col: -1}})
+    m = FT.fit(d, cfg2, n_boot=n_boot, n_jobs=32, name=name, provenance=provenance)
+    m["scale_base"], m["scale_kind"] = base, kind
+    return m
+
+
+def predict_attenuated(model: dict, d: pd.DataFrame) -> np.ndarray:
+    col = f"scale_{model['scale_kind']}"
+    d = d.assign(**{col: FT.predict(model["scale_base"], d) * _atten_col(d, model["scale_kind"])})
+    return FT.predict(model, d)
+
+
+def cv_attenuated(train: pd.DataFrame, cfg: FT.FitConfig, kind: str, k: int = 5, seed: int = 0) -> pd.DataFrame:
+    """Grouped-CV OOF predictions for the two-stage model (the core is refitted per fold: no leakage)."""
+    folds = FT.group_folds(train["cluster"], k, seed)
+    out = train.copy()
+    out["oof"], out["fold"] = np.nan, folds
+    for j in range(k):
+        m = fit_attenuated(train[folds != j], cfg, kind)
+        out.loc[folds == j, "oof"] = predict_attenuated(m, train[folds == j])
+    return out
 
 
 # ----------------------------------------------------------------------------- stage: cap selection (train/val only)
@@ -716,8 +845,9 @@ def stage_report():
             ("s669", "strict", "pearson", "S669-strict r", True), ("s461", "strict", "pearson", "S461-strict r", True),
             ("domainome", "all", "spearman_prot_median", "Dom ρ_dom", True),
             ("abundance_dms", "all", "spearman_prot_median", "Abund ρ", False)]
-    order = ["B3+", "B4", "B4-capC", "B4-capC-soft", "B4-noenv", "B4-phys", "B4-dF", "B4-odd", "B4j", "B4j+C",
-             "B5", "B5-noenv", "B5-phys",
+    order = ["B3+", "B4", "B5", "B6s1", "B6", "B6af_s1", "B6af", "B6hb", "B6d15", "B6j",
+             "B4-capC", "B4-capC-soft", "B4-noenv", "B4-phys", "B4-dF", "B4-odd", "B4j", "B4j+C",
+             "B5-noenv", "B5-phys",
              "B5-dF", "B5-odd", "B5j", "B5j+C", "FoldX", "FoldX-clip", "tmol-refit", "KORPM", "DDGun3D"]
     rows = []
     for mod in order:
@@ -791,7 +921,7 @@ def stage_report():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--stage", default="all", choices=["select", "ablate", "fit", "eval", "antisym", "transfer", "g2check", "caps", "report", "all"])
+    ap.add_argument("--stage", default="all", choices=["select", "ablate", "fit", "eval", "antisym", "transfer", "g2check", "caps", "b6", "report", "all"])
     ap.add_argument("--n-boot", type=int, default=200)
     a = ap.parse_args()
     warnings.filterwarnings("ignore")
@@ -813,6 +943,8 @@ def main():
         stage_g2check()
     if st in ("caps",):
         stage_caps()
+    if st in ("b6",):
+        stage_b6()
     if st in ("report", "all"):
         stage_report()
 

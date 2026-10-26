@@ -23,14 +23,31 @@ Site descriptors (per residue of the WT structure; no side-chain modelling; comp
   backbone    phi, psi, basin (alpha / beta / ppII / alphaL / other), cis_prev
   domain      L, frac_helix, frac_strand, mean_plddt (per structure)
 
-Substitution scales (literature, kcal/mol; used only by the candidate features in scripts/93_*):
-  HELIX_PS  Pace & Scholtz 1998 (Biophys J 75:422) helix propensity, Ala = 0, relative to Ala
-  BETA_MK   Minor & Kim 1994 (Nature 367:660) beta-sheet propensity (internal strand site of GB1), larger = more
-            favourable; values as tabulated in the paper (Pro not measured: set to -3.0 = strongly unfavourable)
-  NCAP_DB   N-cap preference, Doig & Baldwin 1995 (Protein Sci 4:1325) ranking expressed as kcal/mol relative to
-            Ala (negative = favourable N-cap): S/T/D/N strongly favourable, G mildly
+Substitution scales (verification status as of 2026-10-26, fitting lead; see notes/ladder_physics.md "B6"):
+  HELIX_PS  Pace & Scholtz 1998, Biophys J 75:422 (PMID 9649402), helix propensity of solvent-exposed mid-helix
+            residues, kcal/mol relative to Ala. The 19 non-Pro values were VERIFIED against the paper's abstract.
+            Pro = 3.16 is the commonly cited table value and was NOT verified (the abstract excludes Pro).
+            Not used by any shipped model (helix propensity failed selection in the residual analysis).
+  BETA_MK   Minor & Kim 1994, Nature 367:660, beta-sheet propensity. Typed from memory by the analyst and NOT
+            verified; Pro set to -3.0 by hand. Not used by any shipped model (failed selection). Do not cite.
+  NCAP_KT   N-cap preference, now a statistical potential derived from the PISCES train set by
+            scripts/53_ncap_stats.py -> physddg/data/ncap_pref.json: E(aa) = -ln P(aa | N-cap)/P(aa), kT units,
+            negative = favoured (method of Richardson & Richardson 1988, Science 240:1648). Ranking
+            S < D < N < T < P < G < H < C < ... < L < V < I reproduces the literature ranking (Doig & Baldwin 1995,
+            Protein Sci 4:1325: Asn/Asp/Ser/Thr/Cys best, Gly favoured). It REPLACES the analyst's hand-typed
+            "Doig-Baldwin-type" table, whose numbers could not be verified (the paper's table was not retrievable)
+            and whose ranking contradicted the paper (Gln was placed mid-scale; the paper has Gln worst).
+  helix dipole  no scale: Delta q (formal charge, His neutral) x (+1 at helix N1-N3, -1 at C1-C3). Physical basis:
+            Hol, van Duijnen & Berendsen 1978 (Nature 273:443) helix dipole; Shoemaker et al. 1987 (Nature 326:563)
+            charged residues at helix ends. Unit = elementary charge; the weight (kcal/mol per charge) is fitted.
+D15 (state-function differences): ncap_pref and helix_dipole are differences S(mut, site) - S(wt, site).
+  site_scsc and site_hbsc_bur are WT-site main effects (positive for every substitution, like `bur`) and are NOT
+  state-function differences; their D15-compliant counterparts are scsc_dvol = (contacts/30) x (V_wt - V_mut)/100
+  and hbsc_dpolar = partners x burial x (polar(wt) - polar(mut)).
 """
 from __future__ import annotations
+
+import json as _json
 
 from functools import lru_cache
 from multiprocessing import Pool
@@ -50,8 +67,9 @@ HELIX_PS = dict(A=0.00, L=0.21, R=0.21, M=0.24, K=0.26, Q=0.39, E=0.40, I=0.41, 
                 H=0.61, V=0.61, N=0.65, T=0.66, C=0.68, D=0.69, G=1.00, P=3.16)
 BETA_MK = dict(T=1.1, I=1.0, Y=0.96, F=0.86, V=0.82, M=0.72, S=0.70, W=0.54, C=0.52, L=0.51, R=0.45, K=0.27, Q=0.23,
                E=0.01, N=-0.08, H=-0.02, A=0.0, D=-0.94, G=-1.2, P=-3.0)
-NCAP_DB = dict(S=-0.9, T=-0.8, D=-0.9, N=-0.8, G=-0.4, C=-0.3, P=-0.2, A=0.0, E=-0.1, Q=-0.2, H=-0.1, K=0.1, R=0.1,
-               M=0.1, L=0.2, I=0.2, V=0.2, F=0.1, Y=0.0, W=0.1)
+_NCAP_FILE = Path(__file__).resolve().parent / "data" / "ncap_pref.json"
+NCAP_KT = _json.loads(_NCAP_FILE.read_text())["energy_kT"] if _NCAP_FILE.exists() else {}
+NCAP_DB = NCAP_KT          # backwards-compatible name used by scripts/93_*; now the verified PDB-derived scale
 CHARGE = dict(D=-1, E=-1, K=1, R=1)
 AROMATIC = set("FWY")
 RING = {"F": ["CG", "CD1", "CD2", "CE1", "CE2", "CZ"], "Y": ["CG", "CD1", "CD2", "CE1", "CE2", "CZ"],
@@ -405,6 +423,10 @@ def candidate_features(d: pd.DataFrame) -> pd.DataFrame:
     o["scsc_loss"] = d["x_scsc_contacts"].astype(float).clip(upper=30) / 30.0 * loss
     o["scsc_bur"] = d["x_scsc_contacts"].astype(float).clip(upper=30) / 30.0 * bur * nonc
     o["site_hbsc_bur"] = d["x_hb_sc_any"].astype(float).clip(upper=4) * bur * nonc
+    # D15 state-function counterparts of the two site-only terms (antisymmetric on a fixed structure)
+    polar_w = wt.isin(list("STNQHDEKRYW")).astype(float)
+    o["scsc_dvol"] = d["x_scsc_contacts"].astype(float).clip(upper=30) / 30.0 * d["dvol"].astype(float)
+    o["hbsc_dpolar"] = d["x_hb_sc_any"].astype(float).clip(upper=4) * bur * (polar_w - polar_m.astype(float))
     # flags used for per-context scaling of the B5 core (handled in scripts/93)
     o["flag_helix"], o["flag_strand"], o["flag_buried"] = hx, strand, (d["x_rsa"] < 0.25).astype(float)
     o["flag_term3"] = d["x_term3"].astype(float)

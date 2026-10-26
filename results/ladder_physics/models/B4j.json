@@ -1,7 +1,7 @@
 {
  "name": "B4j",
- "created": "2026-10-26T17:21:31",
- "git_commit": "9743124",
+ "created": "2026-10-26T19:42:40",
+ "git_commit": "860d136",
  "config": {
   "features": [
    "e_lj_atr",
@@ -171,7 +171,7 @@
  },
  "provenance": {
   "train": "megascale train (Dataset 3 + censored) + fireprot train",
-  "features": "data/features/phys_s1_*.parquet + simple_*",
+  "features": "data/features/phys_s1_*.parquet + simple_* + extra_sites_* (features_extra)",
   "opts": {
    "elec": "dh",
    "transform": "slog_rep",
@@ -181,7 +181,7 @@
    "cxxc": false
   },
   "caps": null,
-  "selection": "results/ladder_physics/selection.csv (Megascale-val natural + train grouped CV)"
+  "selection": "results/ladder_physics/selection.csv + b6_selection.csv (Megascale-val natural + train grouped CV)"
  },
  "se": {
   "intercept": 0.055227937278815996,

@@ -1,7 +1,7 @@
 {
  "name": "B4-dF",
- "created": "2026-10-26T17:20:55",
- "git_commit": "9743124",
+ "created": "2026-10-26T19:42:31",
+ "git_commit": "860d136",
  "config": {
   "features": [
    "dF",
@@ -84,7 +84,7 @@
  },
  "provenance": {
   "train": "megascale train (Dataset 3 + censored)",
-  "features": "data/features/phys_s1_*.parquet + simple_*",
+  "features": "data/features/phys_s1_*.parquet + simple_* + extra_sites_* (features_extra)",
   "opts": {
    "elec": "dh",
    "transform": "slog_rep",
@@ -94,7 +94,7 @@
    "cxxc": false
   },
   "caps": null,
-  "selection": "results/ladder_physics/selection.csv (Megascale-val natural + train grouped CV)"
+  "selection": "results/ladder_physics/selection.csv + b6_selection.csv (Megascale-val natural + train grouped CV)"
  },
  "derive_opts": {
   "elec": "dh",

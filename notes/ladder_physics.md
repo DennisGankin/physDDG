@@ -102,6 +102,121 @@ at inference on a single structure. The other columns are single-structure score
 
 
 
+## B6: residual-analysis terms (2026-10-26, third issue)
+
+Rung B6 adds the terms that survived the residual analysis (`notes/residual_analysis.md`) to B5 (stage 2) and B4
+(stage 1 → `B6s1`). Everything was re-selected on Megascale-val + grouped CV on train after the feature audit below;
+no test number entered any choice. `B6af` adds the AF-mode pLDDT attenuation and is **only meaningful where
+B-factors are pLDDT** (Megascale's AF2 models, Domainome, AF mode) — on crystal inputs the term is identically 0.
+
+### Feature audit (the analyst's scales were typed from memory)
+- **N-cap preference — replaced.** The hand-typed "Doig–Baldwin-type" table could not be verified: PMC/Europe PMC
+  would not serve the paper's tables, and its ranking contradicted the abstract (it put Gln mid-scale; Doig &
+  Baldwin 1995, Protein Sci 4:1325, report Gln **worst**). I replaced it with a statistical potential derived from
+  our own PISCES train split (`scripts/53_ncap_stats.py` → `physddg/data/ncap_pref.json`, method of Richardson &
+  Richardson 1988, Science 240:1648): E(aa) = −ln P(aa | N-cap)/P(aa) in kT, over 58,800 N-caps. Ranking
+  S < D < N < T < P < G < H < C < … < L < V < I, which matches the published ordering (Asn/Asp/Ser/Thr/Cys best,
+  Gly favoured). The B6 gain is unchanged by the swap (`+ncap_pref` alone: val natural 0.7329 → 0.7422, CV +0.008).
+- **Helix propensity (Pace & Scholtz 1998, Biophys J 75:422)** — the 19 non-Pro values were verified against the
+  paper's abstract; Pro = 3.16 is the commonly quoted value and is *not* verified. Not used by any shipped model
+  (helix propensity failed selection), so this is documentation only.
+- **β-propensity (Minor & Kim 1994)** — unverified, Pro hand-set; also unused. Both are now flagged in the
+  `physddg/features_extra.py` docstring with "do not cite".
+- **Helix dipole** needs no scale: it is Δ(formal charge) × (+1 at N1–N3, −1 at C1–C3), with the weight fitted
+  (Hol et al. 1978, Nature 273:443; Shoemaker et al. 1987, Nature 326:563).
+
+### Selection (Megascale-val natural ρ_prot / grouped-CV natural ρ_prot; stage 2)
+| model | val | CV |
+|---|---|---|
+| B5 (base) | 0.7329 | 0.6727 |
+| + site_scsc | 0.7438 | 0.6844 |
+| + ncap_pref | 0.7422 | 0.6802 |
+| + helix_dipole | 0.7330 | 0.6728 |
+| + site_hbsc_bur | 0.7330 | 0.6845 |
+| **B6 = +3 terms (scsc, ncap, dipole)** | 0.7474 | 0.7011 |
+| B6 + site_hbsc_bur (= B6hb, 4 terms) | 0.7474 | 0.7011 |
+| B6 **+ pLDDT attenuation** (= B6af) | **0.7494** | **0.7096** |
+| B6 + burial attenuation (control) | 0.7474 | 0.7011 |
+| B6-D15 (state-function variant) | 0.7360 | 0.6839 |
+
+**The burial-matched control matters.** `notes/af_mode.md` §4 found that pLDDT shrinkage is a proxy for a
+burial-dependent calibration and recommended against shipping it. Re-run here *on top of a model that already
+contains burial and burial-weighted terms*, the control behaves differently: the burial version is pinned at 0 by
+its sign constraint and, refitted sign-free, takes **+0.75** — it wants to *amplify* buried predictions, not
+attenuate them — while pLDDT attenuation keeps its negative weight (−0.90 ± 0.66) and adds +0.0085 CV. So in B6
+the pLDDT term is not the burial confound the AF study identified. Its CI still includes 0, and it buys +0.006 to
++0.018 on test, so it is a small effect that I ship only in AF mode.
+
+### Results (D17 protocol: identical rows, strict-only S461/S669, FoldX raw and clipped; full table in `main_table.md`)
+| model | MS nat ρ_prot | MS nat-strict | MS all ρ_prot | MS all r | FP r (338) | S669-strict r | S461-strict r | Dom ρ_dom | Dom flag-kept | Abund ρ |
+|---|---|---|---|---|---|---|---|---|---|---|
+| B5 | 0.687 | 0.697 | 0.685 | 0.686 | 0.467 | 0.315 | 0.556 | 0.412 | 0.440 | 0.469 |
+| **B6s1** (stage 1) | 0.690 | 0.699 | 0.690 | 0.688 | 0.427 | 0.302 | 0.567 | 0.433 | — | 0.471 |
+| **B6** (stage 2) | 0.701 | 0.705 | 0.695 | 0.692 | 0.439 | 0.291 | 0.545 | 0.437 | 0.471 | 0.472 |
+| **B6af** (AF mode) | **0.705** | 0.707 | **0.701** | **0.695** | 0.439 | 0.291 | 0.545 | **0.444** | **0.472** | 0.480 |
+| B6hb (+site_hbsc_bur) | 0.711 | 0.703 | 0.702 | 0.693 | 0.452 | 0.286 | 0.536 | 0.436 | — | 0.481 |
+| B6d15 (state-function only) | 0.691 | 0.703 | 0.689 | 0.686 | 0.459 | 0.319 | 0.551 | 0.417 | — | 0.467 |
+| B6j (joint, FireProt-train) | 0.702 | 0.700 | 0.682 | 0.681 | 0.469 | 0.329 | 0.567 | 0.463 | — | 0.484 |
+| FoldX raw / clipped | 0.629 | 0.640 | 0.633 | 0.447 / 0.590 | 0.417 / 0.423 | – | – | 0.430 | 0.458 | – |
+| tmol-refit | 0.622 | 0.637 | 0.626 | 0.629 | 0.486 | – | – | – | – | – |
+
+Paired bootstrap, Megascale-test natural (identical rows):
+- **B6 − B5 = +0.014 [−0.001, +0.036]** ρ_prot, Pearson +0.009 [+0.003, +0.015]. B6af − B5 = +0.018 [+0.006, +0.038].
+  B6s1 − B5 = +0.004 [−0.010, +0.028]: at stage 1 the new terms roughly recover what stage 2 buys.
+- **B6 − FoldX = +0.072 [+0.015, +0.133]**, B6 − FoldX-clip the same on rank and +0.113 [+0.074, +0.143] on Pearson,
+  B6 − tmol-refit +0.078 [+0.034, +0.108], B6 − B3+ +0.052 [+0.031, +0.076]. All exclude 0.
+- Domainome: **B6 − B5 = +0.025 [+0.013, +0.033]** per-domain ρ (and +0.032 on the flag-kept subset), but
+  B6 − FoldX is only +0.007 [−0.020, +0.039] — we finally match FoldX there, we do not beat it.
+- **FireProt-test: B6 is worse than B5** (Pearson −0.026 [−0.049, +0.015], Spearman 0.490 → 0.466) and B6s1 worse
+  still (−0.036). `site_scsc` is the cause (the residual analysis saw the same: −0.016 alone). On crystal structures
+  of larger proteins the side-chain-contact term mis-scales. **B6's gains are Megascale/Domainome gains; on
+  FireProt it costs ~0.03 Pearson, all of it within noise but consistently negative.**
+- S669-strict and S461-strict both *drop* (0.315 → 0.291, 0.556 → 0.545), same cause, same non-significance.
+
+### G6 transfer of the new terms (Megascale-only vs FireProt-only fits, 200 cluster bootstraps, ratio ÷1.7)
+| term | w(Megascale) | w(FireProt) | scaled ratio | verdict |
+|---|---|---|---|---|
+| `ncap_pref` | 0.287 ± 0.035 | 0.473 ± 0.122 | 0.97 | passes cleanly |
+| `helix_dipole` | 0.090 ± 0.021 | 0.132 ± 0.065 | 0.87 | passes cleanly |
+| `site_scsc` | 1.034 ± 0.162 | 0.616 ± 0.243 | 0.35 | passes, but at the edge of the 3× rule |
+| ~~`site_hbsc_bur`~~ | 0.093 ± 0.019 | 0.039 ± 0.047 | 0.25 | **fails → dropped from the headline** (kept as `B6hb`) |
+
+No sign flips, in constrained or sign-free refits. Reference energies correlate r = 0.73 between the two fits.
+Dropping `site_hbsc_bur` costs 0.004 val / 0.007 CV at stage 2 and nothing at stage 1, so the G6 rule is cheap to
+honour here. `site_scsc` at 0.35 is the term to watch: it is a WT-site main effect, it does not transfer well, and
+it is the term that hurts FireProt/S669/S461.
+
+### Strata (Megascale-test, per-protein median ρ; `strata.csv`)
+B6/B6af vs B5 gain where the terms were designed to act — exposed sites (0.554 → 0.578/0.580), charged WT
+(0.516 → 0.525), pLDDT 70–90 (0.565 → 0.589) — and lose on from-Gly (0.639 → 0.594) and designed domains
+(0.684 → 0.671, no pLDDT there). Buried small→large is unchanged (0.495 → 0.477/0.491), so B6 does not touch the
+fixed-backbone clash problem. Stabilising mutations: AUROC 0.738 → 0.742, precision@5 0.152 → 0.190 for B6af,
+still behind FoldX (0.219) and tmol-refit (0.181).
+Domainome by pLDDT band: ≥90 0.489, 70–90 0.326, 50–70 −0.002, <50 −0.037 — **still zero below pLDDT 70**, which is
+why the flag-kept subset (pLDDT ≥ 70 and ≥ 3 residues from a terminus, `notes/af_mode.md` §5) is the right report
+for AF inputs: 0.471 for B6 against 0.440 for B5 and 0.458 for FoldX.
+
+### Term weights (kcal/mol per unit; `weights.csv`)
+`site_scsc` 1.034 ± 0.162 (per unit of contacts/30, so ~1 kcal/mol between an isolated and a fully packed side
+chain), `ncap_pref` 0.287 ± 0.035 (per kT of N-cap log-odds; kT = 0.59, so the potential is ~2× over-confident, the
+same factor as the environment potential), `helix_dipole` 0.090 ± 0.021 (per elementary charge at a helix end:
+0.09 kcal/mol, the right order for a charge–dipole term), `scale_plddt` −0.902 ± 0.659 (the prediction is scaled by
+1 − 0.90·(1 − pLDDT/100), i.e. ×0.73 at pLDDT 70, ×0.55 at pLDDT 50). Adding these three terms pulls `bur` down
+from 0.932 to 0.536: `site_scsc` takes over part of the burial main effect, which is consistent with it being a
+better site-sensitivity descriptor than RSA — and with its weaker transfer.
+
+### Verdict and recommendation
+- Ship **B6** (stage 2) as the default and **B6s1** as the fast mode; both are xtal-compatible. Use **B6af** only
+  when B-factors are pLDDT. Models are in `results/ladder_physics/models/` with `README.md` documenting the
+  schema, the feature contract and the two-stage attenuation rule for E1's `predict.py`.
+- B6 is the first rung that beats FoldX on Megascale rank with a CI excluding 0 on **all three** Megascale subsets
+  (natural +0.072 [+0.015, +0.133]), so **G1 now passes against FoldX on rank**, not only on Pearson. Against the
+  D16 bar (B3+ + 0.03) it passes at +0.052 [+0.031, +0.076].
+- It does not help, and slightly hurts, on the low-throughput crystal sets. If the final product is judged on
+  FireProt/S669, `site_scsc` should be dropped (B6 minus site_scsc: val 0.7391, CV 0.6909 — still above B5).
+
+---
+
 ## Gate verdicts under D16/D17 (paired-bootstrap CIs, identical rows)
 
 **G1 — fails on rank against FoldX, passes on calibration.**
