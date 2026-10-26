@@ -32,7 +32,7 @@ from scipy.optimize import minimize
 from .topology import AA1, AA_INDEX
 
 ROOT = Path(__file__).resolve().parents[1]
-torch.set_default_dtype(torch.float64)
+F64 = torch.float64   # fitter tensors are float64 explicitly; the global default dtype is never changed
 
 
 @dataclass
@@ -231,7 +231,7 @@ class _Problem:
                 m = torch.where(sel, m + dn[k][self.im] - dn[k][self.iw], m)
         if self.other:
             a, b = self.get(th, "a"), self.get(th, "b")
-            A = torch.ones(len(self.datasets)); B = torch.zeros(len(self.datasets))
+            A = torch.ones(len(self.datasets), dtype=F64); B = torch.zeros(len(self.datasets), dtype=F64)
             idx = torch.as_tensor([self.datasets.index(ds) for ds in self.other])
             A = A.index_put((idx,), a); B = B.index_put((idx,), b)
             m = A[self.dit] * m + B[self.dit]
@@ -257,7 +257,7 @@ class _Problem:
             rl = torch.clamp(torch.nan_to_num(self.lo, neginf=-1e9) - m, min=0)
             rh = torch.clamp(m - torch.nan_to_num(self.hi, posinf=1e9), min=0)
             l = torch.where(self.point, hub(self.y - m), hub(rl) + hub(rh))
-        rwt = torch.as_tensor(rw)
+        rwt = torch.as_tensor(rw, dtype=F64)
         obj = (rwt * l).sum() / rwt.sum()
         if self.pairs is not None:
             I, J, S = self.pairs
@@ -285,7 +285,7 @@ class _Problem:
         rw = self.base_w if rw is None else rw
 
         def fg(x):
-            th = torch.tensor(x, requires_grad=True)
+            th = torch.tensor(x, dtype=F64, requires_grad=True)
             f = self.loss(th, rw)
             f.backward()
             return float(f.detach()), th.grad.numpy().copy()
