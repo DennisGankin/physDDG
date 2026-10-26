@@ -1,0 +1,6 @@
+dataset,split,n,s2_dF,dF+dref,dF_per_protein_median
+megascale,val,27328,0.5326,-0.0255,0.5404
+megascale,test,28172,0.5188,0.0372,0.557
+fireprot,test,347,0.3083,-0.0007,
+s669,all,667,0.2415,-0.0469,
+ssym,all,684,0.4004,0.2126,

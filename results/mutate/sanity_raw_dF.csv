@@ -1,0 +1,7 @@
+stage,dataset,split,n,spearman,pearson,spearman_prot_median,spearman_prot_median_natural
+1,megascale,val,27328,0.5206,0.2633,0.5267,0.552
+1,megascale,test,28172,0.5068,0.2887,0.5349,0.5349
+1,fireprot,test,347,0.2757,0.0897,,
+2,megascale,val,27328,0.5326,0.3196,0.5404,0.5449
+2,megascale,test,28172,0.5188,0.3095,0.557,0.5606
+2,fireprot,test,347,0.3083,0.1603,,

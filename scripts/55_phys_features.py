@@ -178,6 +178,11 @@ def assemble(name: str, rows: pd.DataFrame, stage: int, cdir: Path) -> pd.DataFr
                 cols[f"{pre}_d{k}"] = d(z[k])
         if "S_site" in z:
             cols[f"{pre}_dTS"] = kT * d(z["S_site"])
+        if "S_local" in z:                                        # stage 2: mean-field entropy of the local region
+            cols[f"{pre}_dTS"] = kT * d(z["S_local"])
+        if "n_nb" in z:
+            cols[f"{pre}_n_nb"] = z["n_nb"][s_]
+            cols[f"{pre}_nb_native_frac_wt"] = z["nb_native_frac"][s_, w_]
         for j, t in enumerate(terms):
             cols[f"{pre}_dE_{t}"] = d(z["E_avg"][..., j])
             if "E_min" in z:
