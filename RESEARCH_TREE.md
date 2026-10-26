@@ -76,10 +76,16 @@ Decisions are logged as D<n> (see bottom). Dates are 2026.
   - [-] site_scsc hurts crystal sets (FireProt −0.026 Pearson, S669/S461-strict) and sits at the G6 3× edge (0.35); site_hbsc_bur fails G6 (0.25, undetermined on FireProt) → out of headline
   - Hand-typed N-cap table contradicted its source (Gln) → replaced by PISCES-derived potential; Minor–Kim/Pace–Scholtz scales unused and marked 'do not cite'
   - pLDDT attenuation passes the burial control (sign-free burial version amplifies buried predictions, +0.75) but weight CI includes 0, test gain only +0.006…+0.018 → AF only
-  - [~] 4.10b Final headline B6g = B6 without site_scsc/hbsc (D19), Stage-1 analogue B6gs1 (default fast), B6gaf (AF); B6x (with site_scsc) as transparent variant; final ablation + G6 tables; JSONs final_{stage1,stage2,af}.json (agent: fit)
+  - [x] 4.10b Final models (notes/ladder_physics.md): B6gs1 / B6g / B6gaf / B6x; JSONs final_{stage1,stage2,af}.json
+  - [!] Megascale-test natural / all per-protein ρ: B5 0.687/0.685 · B6gs1 0.678/0.684 · B6g 0.692/0.692 · B6gaf 0.699/0.699 · B6x 0.701/0.695 · FoldX 0.629/0.633; B6g − B5 +0.005 [−0.004,+0.019] (indistinguishable); only B6gaf clears 0 vs B5 (+0.012 [0.000,+0.027]) on AF-type input; B6gs1 < B5 (−0.008): at Stage 1 the new terms don't pay for themselves
+  - [!] vs FoldX significant on all 3 MS subsets: +0.058…+0.063 rank; Pearson +0.105 [+0.068,+0.135] over clipped FoldX; RMSE 0.78 vs 1.84; stabilising precision@5 B6g/B6gaf 0.190/0.229 vs FoldX 0.219 (first to match/beat)
+  - G6 (B6g): all 20 weights pass (ratios 0.67–1.87, no sign flips; Δref r 0.75); Stage-1: dTS and dref_* undetermined on FireProt
+  - Drop-one ablation (CV): B3+ remainder −0.047, engine energies −0.032, Δref −0.022, vdW −0.011, H-bonds −0.009, N-cap −0.009, env potential −0.006, Stage 2→1 −0.006, dipole −0.001 — no group dominates
+- [~] 4.12 E3: end-to-end differentiable fit of ≤ 40 physical parameters (atom-type solvation, vdW scales, H-bond strengths, elec, kT) through Stage 1 (agent: E3)
+- [~] 4.13 Independent critique #2 of project state & remaining ideas (agent: critic2)
+- [~] 6.3 Vectorise features_extra.site_descriptors + CPU hot-spot profile (agent: E1)
 - [x] 6.2 predict() computes N-cap/dipole via the training path, loads final_{stage1,stage2,af}.json, full AF mode (`--mode af`, `--crop`, trim with packed exemption, Stage-2 shell repack, attenuation, flags incl. `withheld`, `site_trimmed`); 77 tests pass; examples in results/examples/
   - Speed with final features (1 GPU): Stage 1 0.8 / 2.5 / 4.8 / 13.1 s for 59 / 141 / 269 / 597 res; Stage 2 2.0 / 4.9 / 10.1 / 26.5 s; AF mode 11 s (150 res) – 43 s (603 res); 4 GPUs: Domainome 63 s S1 / 203 s S2; target < 1 min per 300 res met
-  - [ ] 6.3 Vectorise features_extra.site_descriptors (pure-Python loops cost ~2 s per 270 res; Stage 1 went 2.9 s → 4.8 s) after fit agent finishes
 - [x] 4.11 Optional 'PhysDDG+evo' (notes/evo_extension.md): B5 + ONE weight on a hhblits/UniClust30 profile log-ratio (−0.113 ± 0.007 kcal/mol per nat); 1,492 chains profiled (natural 89–98% deep; 109 designed Megascale domains have no homologue → term reduces to BLOSUM62)
   - Megascale-test per-protein ρ B5 0.685 → 0.726 (+0.040 [−0.005,+0.071]); natural-21 +0.052 but natural-strict-14 only +0.014 (−0.006 on the ρ column); 7 natural proteins with a train homologue +0.062 (7/7 up)
   - FireProt +0.022 (n.s.); S669-strict +0.037 (sig.); Domainome per-domain 0.411 → 0.486 (+0.074 [+0.059,+0.084]), pLDDT<50 −0.036 → 0.061
