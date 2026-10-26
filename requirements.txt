@@ -7,3 +7,6 @@ pytest==9.1.1
 scikit-learn==1.9.1
 scipy==1.18.1
 gemmi==0.7.5
+torch==2.14.1
+pydssp==0.9.1  # optional, DSSP cross-check only (scripts/43)
+einops==0.8.2  # pydssp dependency

@@ -15,8 +15,8 @@ Conventions
   H position not determined by heavy atoms: Ser/Thr/Tyr OH, Lys NZ). `acc_hyb` is sp2 / sp3 / ring.
 - Ideal internal coordinates (IC): each side-chain atom D is built from three earlier atoms A,B,C with
   |CD| = bond, angle(B,C,D) = angle, dihedral(A,B,C,D) = chi_k + offset (chi_k in 1..4) or offset if chi=0.
-  Bond lengths/angles are Engh & Huber (1991/2001) values cross-checked against medians in a culled
-  high-resolution PDB set (scripts/41_ideal_geometry.py; notes/engine_geometry.md).
+  Values are medians over well-ordered residues of the culled high-resolution PDB set
+  (scripts/41_ideal_geometry.py); bonds/angles agree with Engh & Huber (2001) to ~0.005 A / ~1 deg.
 """
 from __future__ import annotations
 
