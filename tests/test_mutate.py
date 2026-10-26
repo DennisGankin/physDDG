@@ -159,7 +159,8 @@ def test_predict_api_wt_to_wt_and_reproduces_fit():
     import pandas as pd
     from physddg.predict import PhysDDG
     preds = Path("results/ladder_physics/preds_megascale.parquet")
-    m = PhysDDG(stage=1, device=DEV)
+    from physddg.predict import MODELS
+    m = PhysDDG(MODELS / "B4.json", device=DEV)
     out = m.predict(PDB, ["S1S", "P2P", "E3E", "E3A"])
     assert (out.ddg.to_numpy()[:3] == 0.0).all() and out.ddg.to_numpy()[3] != 0.0
     assert out.wt_match.all() and out.site_found.all()
@@ -177,3 +178,60 @@ def test_determinism_across_runs_and_gpus(prot):
     assert np.array_equal(r[0], r[1]) and np.array_equal(r[0], r[2])
     r2 = [SiteScan(prot, MutateConfig(), d).stage2(sites)["F"] for d in ("cuda:0", "cuda:1")]
     assert np.array_equal(r2[0], r2[1])
+
+
+
+def _stored(bench):
+    import pandas as pd
+    f = Path(f"results/ladder_physics/preds_{bench}.parquet")
+    return pd.read_parquet(f) if f.exists() else None
+
+
+@pytest.mark.parametrize("name,bench", [("B6gs1", "megascale"), ("B6g", "megascale"), ("B6gaf", "megascale"),
+                                        ("B6gaf", "domainome")])
+def test_predict_reproduces_shipped_models(name, bench):
+    """predict() (exact training-time feature path incl. features_extra and the two-stage attenuation) reproduces
+    the fitting agent's stored predictions to 1e-4 on two proteins."""
+    from physddg.predict import MODELS, PhysDDG
+    P = _stored(bench)
+    if P is None or name not in P or not (MODELS / f"{name}.json").exists():
+        pytest.skip(f"{name} predictions / weights not available")
+    m = PhysDDG(MODELS / f"{name}.json", device=DEV)          # xtal mode, struct_source from the table
+    for pid in P.protein_id.unique()[:2]:
+        g = P[P.protein_id == pid]
+        o = m.predict(g.structure.iloc[0], [f"{c}:{w}{r}{u}" for c, w, r, u in zip(g.chain, g.wt, g.pdb_resnum, g.mut)],
+                      struct_source=g.struct_source.iloc[0])
+        assert np.nanmax(np.abs(o.ddg.to_numpy() - g[name].to_numpy())) < 1e-4
+
+
+def test_crystal_input_never_attenuated():
+    from physddg.predict import MODELS, PhysDDG
+    w = MODELS / "B6gaf.json"
+    if not w.exists():
+        pytest.skip("B6gaf weights not available")
+    m = PhysDDG(w, device=DEV, mode="xtal")
+    o = m.predict(PDB, ["E3A", "V4A", "Q5P"], terms=True)
+    assert (o["c_scale_plddt"] == 0.0).all()
+    a = PhysDDG(w, device=DEV, mode="af", trim=False).predict(PDB, ["E3A", "V4A", "Q5P"], terms=True)
+    assert "withheld" in a and "withheld" not in o
+
+
+def test_af_crop_equals_construct_file():
+    """Cropping the full AF model to the assayed range reproduces predictions on the construct file exactly."""
+    import pandas as pd
+    from physddg.predict import PhysDDG
+    f = Path("data/processed/domainome.parquet")
+    if not f.exists():
+        pytest.skip("domainome table not available")
+    D = pd.read_parquet(f, columns=["protein_id", "structure", "af_full_structure", "af_full_resnum", "pdb_resnum",
+                                    "wt", "mut"])
+    G = D[D.protein_id == D.protein_id.iloc[0]]
+    if not Path(G.af_full_structure.iloc[0]).exists():
+        pytest.skip("full AF model not available")
+    g = G.iloc[::25]
+    fr = G.af_full_resnum.astype(int)
+    m = PhysDDG(mode="af", device=DEV, trim=False)
+    a = m.predict(g.structure.iloc[0], [f"{w}{r}{u}" for w, r, u in zip(g.wt, g.pdb_resnum, g.mut)])
+    b = m.predict(g.af_full_structure.iloc[0], [f"{w}{r}{u}" for w, r, u in zip(g.wt, g.af_full_resnum.astype(int), g.mut)],
+                  crop=f"A:{fr.min()}-{fr.max()}")
+    assert b.wt_match.all() and np.allclose(a.ddg.to_numpy(), b.ddg.to_numpy(), atol=1e-6)
