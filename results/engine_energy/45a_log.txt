@@ -1,8 +1,8 @@
        term       value  max_abs_grad  max_abs_err      rel_err  n_nonzero
      lj_atr -209.219210  1.428526e+00 7.310766e-09 5.117699e-09        180
-     lj_rep   84.880398  1.029180e+01 2.652685e-07 2.577474e-08        165
-solv_apolar   20.530079  1.201992e-01 7.088974e-11 5.897686e-10        180
- solv_polar -541.590919  1.105609e+00 1.371603e-09 1.240586e-09        180
+     lj_rep   10.645967  3.831241e+00 7.465503e-08 1.948586e-08         99
+solv_apolar   17.617234  1.659933e-01 4.770036e-11 2.873632e-10        180
+ solv_polar -499.842832  1.323212e+00 1.355515e-09 1.024412e-09        180
    hb_sc_bb   -2.469958  4.161017e-01 3.603107e-07 8.659198e-07          3
    hb_sc_sc   -0.720106  1.000000e-08 0.000000e+00 0.000000e+00          0
    hb_bb_bb  -29.877136  6.798298e+00 2.005753e-07 2.950375e-08         75
@@ -12,5 +12,5 @@ solv_apolar   20.530079  1.201992e-01 7.088974e-11 5.897686e-10        180
      disulf    0.000000  1.000000e-08 0.000000e+00 0.000000e+00          0
 forward bitwise deterministic (float32): True
 gradient bitwise deterministic with torch.use_deterministic_algorithms(True): True; default mode max |dg| = 0.00e+00
-float32 vs float64 total abs diff per term: [5.e-05 0.e+00 0.e+00 1.e-05 0.e+00 0.e+00 7.e-05 0.e+00 0.e+00 0.e+00
- 0.e+00]
+float32 vs float64 total abs diff per term: [5.0e-05 1.0e-05 1.0e-05 2.5e-04 0.0e+00 0.0e+00 7.0e-05 0.0e+00 0.0e+00
+ 0.0e+00 0.0e+00]

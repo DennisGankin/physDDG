@@ -1,6 +1,7 @@
 # Engine: energy function (E2) — physddg/params.py, physddg/energy.py
 
-Status 2026-10-26. Tests: `tests/test_energy.py` (21 pass). Validation scripts `scripts/45a-d_*.py`, outputs in
+Status 2026-10-26 (v2 after PI follow-ups: verified parameters, D14 rep_scale 0.9, StatTerms wired).
+Tests: `tests/test_energy.py` (23 pass). Validation scripts `scripts/45a-d_*.py`, outputs in
 `results/engine_energy/`.
 
 ## API (torch, float32, GPU; every call returns per-term energies `[..., n_terms]`, never summed)
@@ -22,15 +23,17 @@ Representation: **residue blocks** of A = 15 atom slots (E1's atom14 template or
   Boltzmann packer needs: one-body = intra + vs fixed env, two-body = between flexible residues.
 - `atom_solvation(blocks)` per-atom EEF1 solvation `[L,15]` (burial descriptor).
 - `Blocks.cap` per-residue repulsion cap (D9: `c0 + c1*flex(site)`); pair cap = max of the two atoms' caps.
-- `StatTerms` interface for Ramachandran (`rama(aa, phi, psi)`, periodic bilinear) and side-chain entropy
-  (`sc_entropy(aa)`); `StatTerms.from_library()` loads E1's tables once `physddg/rotlib.py` exists.
+- `StatTerms()` (E1's physddg/data/pdbstats.npz via rotlib.PDBStats), torch/differentiable, kcal/mol (nats x kT
+  0.5925): `rama(aa, phi, psi, next_is_pro=None)` (pre-Pro map for non-Gly/Pro), `env(aa, ss3, cn)` (D4
+  environment potential, cn = structure.smooth_cn), `sc_entropy(aa, ss)`. Tested equal to PDBStats.
 - `enable_compile()` optional torch.compile of the short-range kernel (~2x; ~40 s compile per shape pattern).
 Consistency: local/env results equal the whole-structure decomposition to < 4e-6 kcal/mol (tested).
 
 ## Functional forms (constants in `params.EnergyParams`, frozen)
 - LJ (CHARMM form eps[(Rmin/r)^12 - 2(Rmin/r)^6]) split at Rmin (WCA): attraction = -eps inside Rmin, LJ beyond,
   CHARMM-switched 6->8 Å; repulsion = eps(u-1)^2, u=(Rmin/r)^6, linear continuation where it exceeds
-  `rep_cap` (3 kcal/mol/pair default; analytic r_c, C1-continuous). `rep_scale` scales repulsive radii.
+  `rep_cap` (3 kcal/mol/pair default; analytic r_c, C1-continuous). `rep_scale` = 0.9 scales repulsive
+  radii (D14, structural calibration on native chis only, see (c)).
   Donor–acceptor pairs use Rmin <= 3.0 Å (implicit polar H). 1-4 pairs use CHARMM19 1-4 vdW, scaled w14 = 0.5.
 - EEF1: dG_i = dG_ref_i - sum_j f_i(r) V_j, f_i = dG_free_i/(2 pi^1.5 lambda_i r^2) exp(-((r-R_i)/lambda_i)^2),
   switched 7->9 Å; apolar term = C/S atoms, polar term = N/O atoms. dG_ref enters via intra/one-body.
@@ -54,60 +57,60 @@ Consistency: local/env results equal the whole-structure decomposition to < 4e-6
 - Deterministic: dense block evaluation, plain tensor sums, `index_put` without accumulation. Forward bitwise
   reproducible; gradients bitwise reproducible (also under `torch.use_deterministic_algorithms(True)`).
 
-## Parameter sources (params.py)
-- vdW: CHARMM19 united-atom (param19; Brooks 1983, Neria et al. 1996): Rmin/2, eps; 1-4 values for carbons.
-- Solvation: EEF1, Lazaridis & Karplus 1999 Proteins 35:133 Table I (V, dG_ref, dG_free, lambda 3.5/6.0 Å).
-- Verification: no copy of param19.inp / solvpar.inp was reachable (CHARMM distribution only; web search
-  found none). dG_ref/dG_free/lambda were cross-checked against the EEF1 table in PLUMED
-  (`src/colvar/EEFSolv.cpp`, same Lazaridis–Karplus dG values for CHARMM22/36 types): all agree except SH1E
-  (free Cys, -2.05 recalled; PLUMED's S is -3.24), flagged in `params.DG_VERIFIED`. Volumes and vdW values
-  are CHARMM19 numbers from memory (`verified=False` in the docstring). They enter only through term-level
-  weights; PI may want them checked against a CHARMM c28+ distribution.
+## Parameter sources (params.py) — all verified
+- vdW: CHARMM19 united-atom param19.inp NONBONDED (Rmin/2, eps; carbon 1-4 values eps 0.1 / Rmin/2 1.9):
+  verified against a public copy of param19.inp (VMD trunctraj plugin, CVS mirror on GitHub).
+- Solvation: EEF1 Table I (Lazaridis & Karplus 1999) for CHARMM19 types: V, dG_ref, dG_free, lambda, R_i verified
+  against OSPREY3 `config/eef1parm.dat` (verbatim Table I incl. dH/dCp); dG_ref also agrees with PLUMED
+  `EEFSolv.cpp`. `scripts/44_fetch_energy_param_sources.sh` downloads the three files (data/raw/param_sources,
+  SHA256SUMS) and `tests/test_energy.py::test_params_match_sources` checks every number.
+- Corrections found by the verification: dG_free ≠ dG_ref in EEF1 for most types (I had set them equal from
+  the CHARMM22 port): CH1E -0.25, CH2E 0.52, CH3E 1.50, NH1 -8.9, NR -4.0, NH2 -7.8, N -1.55, OH1 -6.7, O -5.85,
+  S -4.1, SH1E -2.7; NH2 dG_ref -5.45 (was -5.95). Radii, well depths, volumes, SH1E dG_ref were correct.
+  The paper itself (Wiley) could not be fetched (Cloudflare); the OSPREY file reproduces its table.
 - Type merges (20-type vocabulary): CA->CH1E (Gly too), C_aro->CR1E (incl. ring C without H), C_sp2->C,
   N_his->NR, N_trp->NH1, N_arg->NC2 (NE too), O_amide->O, OXT->OC, S_cys->SH1E, S_met->S.
 
 ## Validation
+Numbers below are for the final parameters (verified values, rep_scale 0.9).
+
 (a) Gradients (45a; 1BNL, 40 residues, float64, 0.05 Å noise, central FD h=1e-4): max relative error
 <= 9e-7 for every term with nonzero gradient (hb_sc_sc and disulf have no instance in that region; covered by
-the targeted FD tests in tests/test_energy.py). float32 vs float64 totals differ by <= 7e-5 kcal/mol.
+targeted FD tests in tests/test_energy.py). float32 vs float64 totals differ by <= 7e-5 kcal/mol. Forward and
+backward bitwise deterministic.
 
 (b) Native structures (45b; 30 FireProt X-ray structures, 60–450 residues):
 - Backbone H-bonds (E < -0.5) vs Kabsch–Sander map with DSSP-style H: precision 0.976, recall 0.986
   (4094 DSSP H-bonds). Differences come from H placement (bisector vs DSSP convention) and the -3 floor/switch.
-- EEF1 per-atom solvation fraction dG_i/dG_ref_i vs freesasa atom SASA: Spearman 0.825 (polar atoms,
-  n=16893), 0.866 (apolar, n=10630). Per-residue (symmetric decomposition) desolvation vs rSA: apolar 0.51,
-  polar -0.30 (backbone N/O dominate the polar part).
-- Per-residue energies (mean, kcal/mol; `45b_by_aa_burial.csv`): buried hydrophobic LJ -7.9 (atr -11.0,
-  rep +3.1), apolar desolvation -0.66, polar desolvation +6.0 (backbone), H-bonds -2.1, elec 0;
-  exposed charged: elec_dh -0.04, elec_dd -0.31 (~neutral), LJ -3.7, H-bond -0.9. Buried > exposed for
-  LJ attraction and apolar burial in every aa; Trp/Phe/Tyr/Arg most favourable LJ.
-- Note: lj_rep has a positive floor (~1.5–3 kcal/mol per residue) from 1-4 and close native contacts
-  (CHARMM19 united-atom radii are generous for heavy-atom-only crystal contacts) — see (c).
+- EEF1 per-atom solvation fraction dG_i/dG_ref_i vs freesasa atom SASA: Spearman 0.859 (polar atoms,
+  n=16893), 0.868 (apolar, n=10630). Per-residue (symmetric decomposition) desolvation vs rSA: apolar 0.51,
+  polar -0.35 (backbone N/O dominate the polar part).
+- Per-residue energies (mean, kcal/mol; `45b_by_aa_burial.csv`): buried hydrophobic LJ -10.6 (atr -11.0,
+  rep +0.4), apolar desolvation -0.91, polar desolvation +7.7 (mostly backbone), H-bonds -2.1, elec 0;
+  exposed charged: elec_dh -0.04, elec_dd -0.31 (~neutral), LJ -5.9, H-bonds -0.9. Burial makes LJ attraction
+  and apolar burial more favourable for every aa; Trp/Phe/Tyr/Arg most favourable LJ. With rep_scale 0.9 the
+  native repulsion floor dropped from ~1.5–3 to ~0.2–0.45 kcal/mol per residue.
 
 (c) Native vs perturbed chis (45c; 3425 well-ordered residues, 27,400 perturbations; rigid rotations of
 downstream atoms). Fraction of perturbations where the native scores better (ties excluded):
 | term | large (±120°) | small (15–40°) | large, clash-free | small, clash-free |
 |---|---|---|---|---|
-| lj_rep | 0.93 | 0.85 | 0.30 | 0.28 |
-| lj_atr | 0.41 | 0.49 | 0.72 | 0.73 |
-| solv_apolar | 0.31 | 0.38 | 0.66 | 0.70 |
-| solv_polar | 0.78 | 0.65 | 0.29 | 0.29 |
-| hb (all) | 0.75 | 0.75 | 0.69 | 0.71 |
-| elec_dh | 0.63 | 0.55 | 0.66 | 0.61 |
-| disulf | 0.99 | 1.00 | 0.94 | 1.00 |
-| unit-weight total | 0.95 | 0.88 | 0.47 | 0.44 |
-| total without rep | 0.82 | 0.73 | 0.67 | 0.66 |
-"clash-free" = perturbations with dE_rep < 0.5 kcal/mol (attraction/solvation/H-bonds only).
-Reading: repulsion drives recognition of clashing alternatives; in the clash-free set attraction, apolar
-burial, H-bonds and electrostatics each prefer the native in 66–73 % of cases, whereas polar desolvation
-(perturbed polar groups pointing to solvent) and repulsion (native contacts slightly inside CHARMM19 Rmin)
-prefer the decoy, so unit weights are near chance there. Term weights must be fitted (polar desolvation
-needs to be balanced by H-bonds, as in all EEF1-type functions); w14 (0/0.5/1) and cap (1/3/10) barely change
-the fractions. Repulsion-radius sensitivity: over all perturbations the unit-weight total prefers the native in
-0.945 / 0.881 (large / small) with rep_scale 1.0, 0.944 / 0.893 with 0.9, 0.919 / 0.818 with 0.8; with 0.9
-repulsion prefers the native in 61–63 % of its own clash-free set (vs 28–30 % at 1.0). So the CHARMM19
-radii are ~10 % too large for heavy-atom-only crystal contacts. Default kept at 1.0 (literature value);
-rep_scale = 0.9 is the recommended candidate, PI decision (structure-only calibration, no ΔΔG data used).
+| lj_rep | 0.93 | 0.86 | 0.61 | 0.63 |
+| lj_atr | 0.41 | 0.49 | 0.64 | 0.63 |
+| solv_apolar | 0.31 | 0.39 | 0.59 | 0.59 |
+| solv_polar | 0.78 | 0.65 | 0.44 | 0.44 |
+| hb (all) | 0.75 | 0.75 | 0.66 | 0.69 |
+| elec_dh | 0.63 | 0.55 | 0.64 | 0.59 |
+| disulf | 0.99 | 1.00 | 0.97 | 1.00 |
+| unit-weight total | 0.94 | 0.89 | 0.70 | 0.71 |
+| total without rep | 0.83 | 0.74 | 0.69 | 0.67 |
+"clash-free" = perturbations with dE_rep < 0.5 kcal/mol under the same setting.
+Reading: repulsion drives recognition of clashing alternatives; among clash-free alternatives attraction,
+repulsion, apolar burial, H-bonds and electrostatics each prefer the native in 59–69 % of cases; only polar
+desolvation prefers decoys (perturbed polar groups pointing to solvent; must be balanced by H-bond weight).
+Sensitivity (unit total, large / small): rep_scale 1.0 0.944 / 0.877, 0.9 0.944 / 0.889, 0.8 0.920 / 0.819;
+w14 0/0.5/1 and cap 1/3/10 change fractions by <= 0.016. With rep_scale 1.0 repulsion preferred the decoy in
+the clash-free set (0.28–0.30) — the basis of D14.
 
 (d) Speed (45d; RTX 4090, float32, shared GPU):
 | test | time | throughput |
@@ -122,19 +125,15 @@ Main speed devices: per-site neighbour lists shared across variants, trimming em
 by size within a site), compact charged-atom lists for electrostatics.
 
 ## Open issues
-1. Parameter verification (volumes / vdW / SH1E dG) against an actual param19/solvpar file.
-2. lj_rep floor and clash-free repulsion preference: rep_scale 0.9 fixes most of it (45c); PI to decide
-   whether to adopt it as the default.
-3. sp2_2H donors (Asn/Gln/Arg NH2) use a cone window, the in-plane H constraint is ignored; His tautomers both
+1. sp2_2H donors (Asn/Gln/Arg NH2) use a cone window, the in-plane H constraint is ignored; His tautomers both
    donor+acceptor; Asn/Gln/His flips not resolved (packer's job).
-4. EEF1 cutoff 9 Å truncates lambda = 6 Å charged-group Gaussians (EEF1 standard practice).
-5. Dynamic disulfide detection is discontinuous at SG-SG = 2.5 Å.
-6. StatTerms waits for E1's tables.
+2. EEF1 cutoff 9 Å truncates lambda = 6 Å charged-group Gaussians (EEF1 standard practice).
+3. Dynamic disulfide detection is discontinuous at SG-SG = 2.5 Å.
+4. Ring carbons without H merged into CR1E (EEF1 has C/CR for them); could be split if E1 adds a type.
 
 ## Requests to E1
-- R1: add an explicit intra-residue bond list (e.g. `topology.BONDS[aa]`) so energy.py can drop its private
-  `_SC_BONDS` (currently tested for consistency with `IC_SPEC`).
-- R2: rotamer-library module: expose `RAMA_GRID` [20 (+ pre-Pro rows), n, n] as -kT ln P(phi,psi|aa) on a
-  periodic grid starting at -180°, and `SC_ENTROPY` [20] (kcal/mol); `StatTerms.from_library()` picks them up.
-- R3: builder output → energy: `blocks_from_arrays` takes atom14 + OXT; packer variants can build `Blocks`
-  directly from `build_sidechains` output (see scripts/45d_energy_speed.py, OXT slot appended as absent).
+- R1 (open): add an explicit intra-residue bond list (e.g. `topology.BONDS[aa]`) so energy.py can drop its
+  private `_SC_BONDS` (currently tested for consistency with `IC_SPEC`).
+- R2 (done 10-26): statistical tables — wired via `StatTerms` to rotlib.PDBStats.
+- R3: packer variants can build `Blocks` directly from `build_sidechains` output (see scripts/45d_energy_speed.py,
+  OXT slot appended as absent). Requests from mutate.py go to notes/engine_mutate.md; none posted yet.
