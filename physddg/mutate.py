@@ -89,6 +89,21 @@ def pdbstats() -> PDBStats:
     return _STATS
 
 
+def _float32(fn):
+    """Run with torch's default dtype = float32 (some importers, e.g. physddg.fit, switch it to float64 globally)."""
+    import functools
+
+    @functools.wraps(fn)
+    def wrap(*a, **k):
+        old = torch.get_default_dtype()
+        torch.set_default_dtype(torch.float32)
+        try:
+            return fn(*a, **k)
+        finally:
+            torch.set_default_dtype(old)
+    return wrap
+
+
 def _sync(dev):
     if str(dev).startswith("cuda"):
         torch.cuda.synchronize(dev)
@@ -97,6 +112,7 @@ def _sync(dev):
 class SiteScan:
     """All-20-aa site evaluation for one protein (structure.Protein, annotated)."""
 
+    @_float32
     def __init__(self, prot, cfg: MutateConfig | None = None, device="cuda", rigidity: np.ndarray | None = None):
         """rigidity: optional per-residue array in [0, 1] for the site-dependent repulsion cap (D9 hook; default:
         normalised smooth CB contact number from prot.ann['cn'])."""
@@ -130,6 +146,7 @@ class SiteScan:
             & ((wt == P_IDX) == (a == P_IDX))
         return torch.where(nat_ok[:, None], self.bb.new_tensor(np.nan_to_num(self.prot.xyz14[sites, 4])), ideal)
 
+    @_float32
     def site_candidates(self, sites: np.ndarray, max_rot: int | None = None, cum: float | None = None,
                         expand: bool | None = None) -> dict:
         """Library rotamers for all 20 aa at `sites`: flat lists (site_local, aa, logp normalised per (site, aa)),
@@ -198,6 +215,7 @@ class SiteScan:
 
     # ------------------------------------------------------------------------- stage 1
     @torch.no_grad()
+    @_float32
     def stage1(self, sites, return_rotamers: bool = False) -> dict:
         sites = np.asarray(sites, np.int64)
         c, kT = self.cfg, self.cfg.kT
@@ -276,6 +294,7 @@ class SiteScan:
 
 
     # ------------------------------------------------------------------------- stage 2
+    @_float32
     def neighbour_sets(self, sites: np.ndarray, cand: dict) -> list[np.ndarray]:
         """Flexible neighbours per site: residues with chis (not Pro, complete side chain) having a movable side-chain
         atom (beyond CB) within nb_radius of any candidate atom (CB onwards) of any residue type at the site.
@@ -310,6 +329,7 @@ class SiteScan:
             out.append(np.sort(idx))
         return out
 
+    @_float32
     def neighbour_candidates(self, J: np.ndarray) -> dict:
         """Candidates for residues J: native side chain (index 0, exact coordinates) + library rotamers (native CB).
         Returns padded tensors: blocks [nJ, C], valid [nJ, C], prior (-kT ln p, renormalised) [nJ, C], E1 [nJ, C, T]
@@ -355,6 +375,7 @@ class SiteScan:
                 "prior": torch.as_tensor(np.where(valid, -kT * logp, 0.0), device=self.dev, dtype=torch.float32)}
 
     @torch.no_grad()
+    @_float32
     def stage2(self, sites) -> dict:
         sites = np.asarray(sites, np.int64)
         c, kT = self.cfg, self.cfg.kT
@@ -564,3 +585,50 @@ def stat_features(prot, sites, kT: float = 0.593) -> dict:
     if "rsa" in a:
         ctx["rsa"] = a["rsa"][sites]
     return {"per_aa": out, "context": ctx}
+
+
+# ============================================================================= backbone ensemble (G3 pre-test)
+def perturbed_protein(prot, amp: float = 0.3, sigma: float = 6.0, seed: int = 0, n_modes: int = 64):
+    """Copy of `prot` whose residues are rigidly translated by a smooth random displacement field: a Gaussian-process
+    sample with RBF kernel of length `sigma` (random Fourier features) evaluated at each CA, scaled to RMS `amp` Å.
+    Neighbouring residues move nearly together (local geometry approximately preserved: peptide C-N lengths change
+    by ~amp * 3.8 / sigma); all atoms of a residue (backbone + side chain + OXT) move together. Annotations (phi/psi,
+    contact numbers, SS) are kept from the native structure so the rotamer candidates are unchanged."""
+    import copy
+    rng = np.random.default_rng(seed)
+    ca = np.nan_to_num(prot.xyz14[:, 1]).astype(np.float64)
+    w = rng.normal(size=(n_modes, 3)) / sigma
+    b = rng.uniform(0, 2 * np.pi, n_modes)
+    a = rng.normal(size=(n_modes, 3))
+    g = np.cos(ca @ w.T + b) @ a * np.sqrt(2.0 / n_modes)                 # [L, 3]
+    g *= amp / np.sqrt((g ** 2).sum(1).mean())
+    q = copy.copy(prot)
+    q.xyz14 = (prot.xyz14 + g[:, None, :]).astype(np.float32)
+    q.oxt = (prot.oxt + g).astype(np.float32)
+    q.ann = prot.ann
+    return q
+
+
+@_float32
+def stage1_ensemble(prot, sites, cfg: MutateConfig | None = None, K: int = 8, amp: float = 0.3, sigma: float = 6.0,
+                    device="cuda", seed: int = 0) -> dict:
+    """Stage 1 on the native backbone + K perturbed backbones (perturbed_protein). Returns per backbone F/E_avg and two
+    aggregates per (site, aa): mean over backbones ('mean') and Boltzmann over backbones ('boltz',
+    F = -kT ln mean_k exp(-F_k/kT); no strain energy of the perturbed environment is included, i.e. every residue type
+    picks its most favourable backbone -> upper bound on relaxation)."""
+    cfg = cfg or MutateConfig()
+    kT = cfg.kT
+    Fs, Es, Ss, Ps = [], [], [], []
+    for k in range(K + 1):
+        q = prot if k == 0 else perturbed_protein(prot, amp, sigma, seed + k)
+        r = SiteScan(q, cfg, device).stage1(sites)
+        Fs.append(r["F"]); Es.append(r["E_avg"]); Ss.append(r["S_site"]); Ps.append(r["prior_avg"])
+    F, Ea, S_, P_ = (np.stack(x) for x in (Fs, Es, Ss, Ps))                  # [K+1, S, 20, ...]
+    lw = -F / kT
+    lz = np.logaddexp.reduce(lw, axis=0)
+    w = np.exp(lw - lz)                                                       # [K+1, S, 20]
+    out = {"F_k": F, "E_k": Ea,
+           "F_mean": F.mean(0), "E_mean": Ea.mean(0), "S_mean": S_.mean(0), "prior_mean": P_.mean(0),
+           "F_boltz": -kT * (lz - np.log(K + 1)), "E_boltz": (w[..., None] * Ea).sum(0),
+           "S_boltz": (w * S_).sum(0), "prior_boltz": (w * P_).sum(0), "ref": r["ref"]}
+    return out
