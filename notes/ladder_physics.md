@@ -102,6 +102,138 @@ at inference on a single structure. The other columns are single-structure score
 
 
 
+## Multi-assay headline: B6gj, and what the Megascale Δref is doing (critique #2 I1/A1/A2, fifth issue)
+
+`scripts/55_multiassay_report.py` → `multiassay_{summary,deltas}.csv`. **Strict subsets are now per model**
+(critique #2 3.4): a model fitted with FireProt-trainval must also exclude FireProt-trainval homologues, so
+S669-strict is n = 488 for Megascale-only models and n = 470 for joint ones, S461-strict 290 vs 285. On
+Megascale-test the two rules coincide (the 5 test proteins with FireProt-trainval homologues are a subset of the
+9 with Megascale-train homologues), and Domainome strict drops 347 → 339 domains for joint models.
+
+### All models, all assays (identical rows within each column, per-model strict)
+| model | MS nat | MS nat-strict | MS all | FireProt | S669-str | S461-str | Domainome | Dom flag-kept | abundance |
+|---|---|---|---|---|---|---|---|---|---|
+| B3+ | 0.648 | 0.649 | 0.649 | 0.456 | 0.339 | 0.570 | 0.389 | 0.407 | 0.446 |
+| B5 | 0.687 | 0.697 | 0.685 | 0.467 | 0.334 | 0.559 | 0.412 | 0.440 | 0.469 |
+| B6g | 0.692 | 0.702 | 0.692 | 0.464 | 0.336 | 0.552 | 0.418 | 0.449 | 0.469 |
+| B6gs1 | 0.678 | 0.690 | 0.684 | 0.455 | 0.346 | 0.572 | 0.414 | 0.450 | 0.468 |
+| B6gaf | 0.699 | 0.704 | 0.699 | 0.464 | 0.336 | 0.552 | 0.425 | 0.454 | 0.478 |
+| **B6gj** (joint) | 0.692 | 0.695 | 0.682 | **0.482** | 0.344 | 0.568 | **0.451** | **0.478** | **0.482** |
+| **B6gjs1** (joint, stage 1) | 0.676 | 0.690 | 0.674 | 0.475 | **0.351** | **0.579** | 0.450 | 0.477 | 0.478 |
+| B6g-refzero (Δref := 0) | 0.687 | 0.671 | 0.660 | 0.443 | 0.308 | 0.519 | 0.439 | 0.466 | 0.467 |
+| B6g-noref (refit, no Δref) | 0.684 | 0.675 | 0.670 | 0.440 | 0.313 | 0.517 | 0.412 | 0.442 | 0.471 |
+| B6x (+site_scsc) | 0.701 | 0.705 | 0.695 | 0.439 | 0.313 | 0.548 | 0.437 | 0.471 | 0.472 |
+| FoldX raw / clipped | 0.629 | 0.640 | 0.633 | 0.417 / 0.423 | – | – | 0.430 | 0.458 | – |
+| tmol-refit | 0.622 | 0.637 | 0.626 | 0.486 | – | – | – | – | – |
+| KORPM | 0.500 | 0.513 | 0.533 | 0.411 | 0.194 | 0.543 | 0.302 | 0.315 | – |
+| DDGun3D | 0.516 | 0.475 | 0.502 | 0.529 | 0.347 | 0.552 | 0.282 | 0.296 | – |
+(Megascale/Domainome/abundance = per-protein median ρ; FireProt/S669/S461 = Pearson.)
+
+### A1 — is the Megascale Δref an assay artefact? **Partly: gate passes, but the story is Domainome-specific.**
+Scoring B6g with its reference energies **zeroed at inference** (same weights, no FireProt data anywhere):
+- Domainome **0.418 → 0.439**, paired +0.020 [+0.009, +0.032]; flag-kept 0.449 → 0.466, +0.017 [+0.001, +0.024].
+  The B5 → B6gj Domainome gain is +0.039, so zeroing Δref recovers **51%** of it — the pre-registered gate
+  ("recovers ≥ half") **passes**, and it passes without using FireProt at all.
+- But it **costs everywhere else**: FireProt 0.464 → 0.443, S669-strict 0.336 → 0.308 (−0.028 [−0.056, −0.002]),
+  S461-strict 0.552 → 0.519, Megascale natural-strict 0.702 → 0.671, Megascale-all 0.692 → 0.660.
+- Refitting without Δref (`B6g-noref`) recovers nothing on Domainome (0.412): other weights absorb the reference
+  energies, so the diagnostic only works by dropping them *at inference*.
+
+**Reading.** The Megascale reference energies are not globally wrong — they help on Megascale and on both crystal
+sets. What they contain is a component that is *actively wrong for Domainome*, consistent with the earlier finding
+that Megascale Δref transfers to buried sites (per-aa ρ 0.84) but not to abundance-assay surfaces (ρ −0.09).
+That is an assay-specific unfolded-state/degron mismatch, not "the PSSM artefact" in general. Critique #1's
+prediction is therefore half-confirmed: the vector is contaminated, but removing it wholesale is not the fix —
+re-estimating it jointly is (below). The Megascale δ_ref nuisance in the joint fits stays large only for **Cys**
+(−0.55 kcal/mol; next largest R +0.19), so the contamination is concentrated, not diffuse.
+
+### A2 — the joint model B6gj. **Gate narrowly fails on its letter, passes on its intent.**
+B6gj = B6g fitted on Megascale-train + FireProt-train, cluster-balanced, per-assay scale/offset, with the
+Megascale δ_ref nuisance dropped at inference (D7).
+| comparison | Megascale nat | Megascale all | FireProt | S669-str | S461-str | Domainome | abundance |
+|---|---|---|---|---|---|---|---|
+| B6gj − B5 | +0.005 [−0.018, +0.017] | −0.003 [−0.043, +0.012] | +0.015 [−0.016, +0.033] | +0.029 [−0.017, +0.100] | +0.012 [−0.040, +0.111] | **+0.039 [+0.019, +0.052]** | **+0.013 [+0.000, +0.013]** |
+| B6gj − B6g | — | — | +0.018 | +0.027 | +0.019 | **+0.032 [+0.015, +0.044]** | +0.013 |
+| B6gj − FoldX-clip | +0.063 | +0.049 | +0.059 | – | – | +0.021 [−0.002, +0.047] | – |
+- **Megascale cost ≈ 0**: +0.005 on the primary subset, −0.003 pooled, −0.007 natural-strict. Well inside the
+  "≤ 0.01 loss" condition.
+- **Domainome vs FoldX: +0.021 [−0.002, +0.047]** — the CI touches zero, so the literal gate
+  ("≥ FoldX + 0.01 with CI excluding 0") **fails**. Against B5 and B6g the Domainome gain *is* significant.
+- B6gj is the only configuration that is ≥ B5 on **every** assay simultaneously, and it is the best structure-only
+  model on FireProt (0.482), Domainome (0.451), flag-kept Domainome (0.478) and abundance_dms (0.482).
+- Stage-1 joint (`B6gjs1`) is the best model on both crystal sets (S669-strict 0.351, S461-strict 0.579) —
+  better than DDGun3D (0.347/0.552) and B3+ (0.339/0.570) — at a Megascale cost of 0.016.
+
+**Recommendation.** Make **B6gj the reported multi-assay model** and keep B6g as the Megascale-only reference fit,
+stating plainly that (a) the Domainome advantage over FoldX is +0.021 with a CI that touches zero, and (b) the
+joint model's S669/S461/Ssym numbers are *not* independent tests, because FireProt-trainval overlaps those sets
+(96.5% of Ssym rows, and the strict columns above already remove the overlap for S669/S461). Nothing here changes
+the Megascale-vs-FoldX claim, which is the same for B6g and B6gj.
+
+**Not done, deliberately:** no Domainome-derived term was added to the joint fit. Domainome is the validation set
+for the AF/abundance regime; training on it would make every Domainome number self-referential. The critique asked
+for it "only if leak-free", and it is not.
+
+### Reporting upgrades (critique #2 3.3)
+`multiassay_summary.csv` and `main_table.md` now carry, for every cell: n variants, n proteins, 95%
+cluster-bootstrap CI, **mean next to median** per-protein ρ, and the **per-protein win count against FoldX** on
+Megascale-test natural (21 proteins): B6gaf 20/21, B6g 19/21, B6gj 19/21, B5 18/21, B6x 18/21, B3+ 16/21,
+tmol-refit 15/21, KORPM 3/21, DDGun3D 0/21. Mean and median agree for the Megascale-only models (B6g 0.692
+median / 0.702 mean) but diverge for the joint ones (B6gj 0.692 / 0.688) and for the Δref diagnostics
+(B6g-refzero 0.687 / 0.672), i.e. zeroing Δref hurts the weaker proteins most. The exact FoldX protocol,
+its unrecorded options and the AF2-structure fairness caveat are in **`notes/foldx_protocol.md`**.
+
+---
+
+## Doubles: how much is there for a pairwise term? (critique #2 I6a; `scripts/54_doubles_additivity.py`)
+
+127,476 Megascale Dataset-3 doubles carry both single values, so ε = ΔΔG(AB) − ΔΔG(A) − ΔΔG(B) is measurable
+without any model. **Raw, it looks enormous and distance-independent**: mean ε = −0.88 kcal/mol, |ε| > 0.5 for
+64% of doubles, and the mean is just as negative at CB–CB > 15 Å (−0.76) as at < 5 Å (−0.78). A distance-blind
+negative offset is not coupling — it is the assay floor: the double is more destabilising, so it saturates and
+the measured ΔΔG falls short of the additive sum.
+
+Restricting to doubles that cannot be floor-limited (sum of singles < 1.5 kcal/mol, dG_mut > 0.5, not
+`flag_mut_floor`; 28,123 rows) removes most of it:
+| CB–CB | n | mean ε | sd ε | \|ε\| > 0.5 |
+|---|---|---|---|---|
+| all (floor-safe) | 28,123 | −0.225 | 0.498 | 31% |
+| < 5 Å | 6,193 | −0.093 | 0.495 | 26% |
+| 5–6.5 Å | 12,601 | −0.284 | 0.512 | 35% |
+| 6.5–8 Å | 2,946 | −0.321 | 0.529 | 41% |
+| 8–10 Å | 2,696 | −0.234 | 0.414 | 26% |
+| 10–12 Å | 1,715 | −0.108 | 0.398 | 23% |
+| > 15 Å | 921 | −0.263 | 0.461 | 19% |
+
+**Reading.** After the floor control, genuine non-additivity is small (sd 0.50 kcal/mol, part of which is
+measurement noise) and only weakly distance-dependent — and not monotonically so: the contact bin (< 5 Å) has the
+*smallest* mean ε, the 5–8 Å shell the largest. There is no clean "close pairs are coupled" signal to exploit.
+**Upper bound on what a pairwise term could buy: ≲0.5 kcal/mol rms on doubles, and nothing identifiable on
+singles.** Combined with the fact that singles are what every benchmark scores, I do not recommend spending
+parameters on explicit coupling terms.
+
+**What is missing to test our own coupling.** This probe uses measured ε only. Scoring the engine's predicted
+coupling needs a double-mutant scan from E1's pipeline: both sites mutated in the same Stage-2 mean-field
+problem, with the two sites in each other's flexible set, returning ΔF(AB) alongside ΔF(A) and ΔF(B) on the same
+structure. Stage 2 already couples a site to its neighbours, so the machinery exists; what is needed is a
+`mutate.pair_scan(site_i, site_j)` entry point and a feature file with `s2_dF_AB`. Given the bound above I would
+only build it if multi-mutant prediction becomes a product requirement — which is a capability argument, not an
+accuracy one.
+
+## Floor-aware loss (critique #2 I7ii)
+
+4,010 Megascale-train rows (1.8%) carry `flag_mut_floor` (dG_mut < −0.5, i.e. the mutant is at the per-domain
+measurement floor) and the residual analysis found they hold 6.6% of the squared error. Refitting B6g with those
+rows as **lower bounds** (Tobit, the same interval machinery already used for the excluded dG < −1 rows):
+val natural ρ_prot 0.7411 → 0.7412, grouped-CV natural 0.6813 → **0.6718**, and no weight moves by more than
+**3.8%**. The critique's own diagnostic was "if weights move > 20%, the current fit was floor-biased" — they move
+4%, so **the fit is not floor-biased and the floor-aware loss does not help ranking** (it slightly hurts CV,
+presumably by discarding real information in those rows). Reported as a negative result; `B6g-floor.json` is kept
+for the record. The separate point stands and is already implemented: the 11,363 rows Tsuboyama *excluded*
+(dG < −1) are used as intervals in every fit.
+
+---
+
 ## D19 final models: B6g / B6gs1 / B6gaf (fourth issue)
 
 **Decision D19.** The shipped default must generalise across assays, so it drops both WT-site main effects:

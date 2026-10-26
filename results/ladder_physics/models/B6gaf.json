@@ -1,7 +1,7 @@
 {
  "name": "B6gaf",
- "created": "2026-10-26T20:15:35",
- "git_commit": "77a0d9a",
+ "created": "2026-10-26T21:28:38",
+ "git_commit": "88f86d5",
  "config": {
   "features": [
    "e_lj_atr",
@@ -4449,8 +4449,8 @@
  },
  "scale_base": {
   "name": "model",
-  "created": "2026-10-26T20:15:33",
-  "git_commit": "77a0d9a",
+  "created": "2026-10-26T21:28:25",
+  "git_commit": "88f86d5",
   "config": {
    "features": [
     "e_lj_atr",

@@ -269,7 +269,10 @@ def features(b: Blocks, p: EnergyParams) -> dict[str, torch.Tensor]:
     bis = -_unit(u1 + u2)                       # external bisector (H direction / ring lone pair)
     dvec = torch.where(dcone[..., None], -u1, bis)          # cone: base->donor axis; else D->H
     avec = torch.where(aring[..., None], bis, -u1)          # base->acceptor direction
-    par = T["param"][t]                                     # [..., A, n_cols]
+    # optional per-type parameter table override (E3, physddg/diffparams.py: differentiable refit of the physical
+    # parameters); absent by default -> the frozen literature table, identical code path
+    tab = p.extra.get("type_table") if p.extra else None
+    par = (T["param"] if tab is None else tab)[t]           # [..., A, n_cols]
     cap = b.cap if b.cap is not None else torch.full_like(b.burial, p.rep_cap)
     f = dict(x=x, m=m, t=t, q=q, don=don, acc=acc, dcone=dcone, dvec=dvec, avec=avec,
              bb=T["is_bb"].expand_as(m), cap=cap[..., None].expand_as(q), bur=b.burial[..., None].expand_as(q),

@@ -209,6 +209,7 @@ def train_tables(cap: str = ""):
         va = add_extra(add_phys(L.megascale_train_table("val"), "megascale", cap), "megascale")
         fp = add_extra(add_phys(L.fireprot_train_table(), "fireprot", cap), "fireprot")
         keep = KS + ["y", "lo", "hi", "sigma_meas", "dataset", "cluster", "domain_origin", "ddg", "cxxc", "rsa", "dvol",
+                     "flag_mut_floor",
                      "bur", "pro_nhhb", "gly_posphi", "occ_dvol_loss", "ss_broken"]
         out = []
         for d in (tr, va, fp):
@@ -348,8 +349,12 @@ EVAL_CAP = "capC"          # cap variant whose columns are merged at evaluation 
 # name -> (stage, kind, joint[, attenuation]); "+C" = catalytic-CXXC exception (test-informed, D17);
 # "af" models carry the pLDDT attenuation and are only meaningful where B-factors are pLDDT (AF/AF2 models).
 ATTEN = {"B6gaf": "plddt"}
+NOREF = {"B6g-noref"}            # refit without reference energies at all
+FLOOR = {"B6g-floor"}            # mut-floor rows (flag_mut_floor) treated as lower bounds (Tobit), critique I7(ii)
 MODELS = {
     "B6gs1": (1, "b6g", False), "B6g": (2, "b6g", False), "B6gaf": (2, "b6g", False),   # D19 shipped models
+    "B6gj": (2, "b6g", True), "B6gjs1": (1, "b6g", True),       # multi-assay joint fits (critique #2 I1a)
+    "B6g-noref": (2, "b6g", False), "B6g-floor": (2, "b6g", False),
     "B6x": (2, "b6", False),                                                          # with site_scsc (transparency)
     "B4-capC": (1, "full", False), "B4-capC-soft": (1, "full", False),
     "B4j+C": (1, "full", True), "B5j+C": (2, "full", True),
@@ -377,10 +382,17 @@ def stage_fit(n_boot):
         if joint:
             d = pd.concat([d, derive(fp, stage, o, caps)], ignore_index=True)
             cfg.ref_nuisance = ("megascale",)
+        if name in FLOOR:      # Tobit: rows at the per-domain floor become lower bounds (critique #2 I7ii)
+            f = d["flag_mut_floor"].fillna(False).astype(bool) & d["y"].notna()
+            d = d.copy()
+            d.loc[f, "lo"], d.loc[f, "hi"], d.loc[f, "y"] = d.loc[f, "y"], np.inf, np.nan
+            print(f"  floor-aware loss: {int(f.sum())} rows converted to lower bounds", flush=True)
         prov = {"train": "megascale train (Dataset 3 + censored)" + (" + fireprot train" if joint else ""),
                 "features": f"data/features/phys_s{stage}_*.parquet + simple_* + extra_sites_* (features_extra)",
                 "opts": o, "caps": caps,
                 "selection": "results/ladder_physics/selection.csv + b6_selection.csv (Megascale-val natural + train grouped CV)"}
+        if name in NOREF:
+            cfg = FT.FitConfig(**{**cfg.__dict__, "ref": False})
         nb = n_boot if kind in ("full", "noenv", "phys", "b6", "b6g") else 0
         if name in ATTEN:
             m = fit_attenuated(d, cfg, ATTEN[name], n_boot=nb, name=name, provenance=prov)
@@ -394,6 +406,13 @@ def stage_fit(n_boot):
         if joint:
             print("  delta_megascale", {k: round(v, 2) for k, v in m["nuisance"]["delta_ref"]["megascale"].items()},
                   m["nuisance"]["scale"], m["nuisance"]["offset"])
+    # critique #2 A1: B6g scored with its fitted reference energies ZEROED (no refit, no FireProt data).
+    # Tests directly whether the Megascale-fitted Delta-ref is what blocks transfer to other assays.
+    b6 = FT.load_model(OUT / "models" / "B6g.json")
+    b6["ref"] = {a: 0.0 for a in b6["ref"]}
+    b6["name"] = "B6g-refzero"
+    b6["provenance"] = {**b6["provenance"], "note": "B6g weights, reference energies set to 0 at inference (diagnostic)"}
+    FT.save_model(b6, OUT / "models" / "B6g-refzero.json")
     (OUT / "models" / "caps.json").write_text(json.dumps({str(k): v for k, v in caps_all.items()}))
 
 
@@ -468,6 +487,18 @@ def stabilising(df, col, k=5):
     return {"auroc_stab": au, f"prec@{k}_per_protein": float(np.mean(prec)) if prec else np.nan, "base_rate": float(pos.mean())}
 
 
+# Models fitted with FireProt-trainval: their "strict" subsets must also exclude FireProt-trainval homologues.
+JOINT_MODELS = {"B4j", "B5j", "B6j", "B6gj", "B6gjs1", "B4j+C", "B5j+C", "B6x-j", "tmol-refit", "KORPM", "DDGun3D"}
+MS_ONLY_STRICT = "homolog_in_megascale_train==0"
+BOTH_STRICT = "homolog_in_megascale_train==0,homolog_in_fireprot_trainval==0"
+
+
+def strict_expr(model: str, bench: str) -> str:
+    """Strictness is a property of the MODEL, not of the benchmark (critique #2 3.4): exclude homologues of
+    every training set that model saw. KORPM/DDGun3D/tmol-refit are trained on ProTherm-family data."""
+    return BOTH_STRICT if model in JOINT_MODELS else MS_ONLY_STRICT
+
+
 SUBSETS = dict(L.SUBSETS)
 # D17(2): S461/S669 reported on strict subsets only (S461-all has 24.5% exact Megascale-train duplicate mutations)
 SUBSETS["s461"] = {"strict": SUBSETS["s461"]["strict"]}
@@ -480,11 +511,28 @@ SUBSETS.pop("s2648", None)
 METRICS = L.METRICS
 
 
+def per_protein_rho(df, col, target):
+    y = df.ddg if target == "ddg" else -df.score
+    d = pd.DataFrame({"p": df.protein_id.to_numpy(), "x": df[col].to_numpy(float), "y": y.to_numpy(float)}).dropna()
+    out = {}
+    for prot, g in d.groupby("p"):
+        if len(g) >= 10 and g.x.nunique() > 1 and g.y.nunique() > 1:
+            out[prot] = spearmanr(g.x, g.y)[0]
+    return pd.Series(out, dtype=float)
+
+
 def _eval_task(bench, sub, model, df, n_boot, comps, rows_tag="own"):
     """rows_tag: 'own' = every row this model predicts; 'common' = rows predicted by ALL table models (D17)."""
     target = "ddg" if df.ddg.notna().any() else "score"
     r = E.evaluate(df, model, target=target)
     row = {"bench": bench, "subset": sub, "rows": rows_tag, "model": model, **{k: r[k] for k in METRICS}}
+    row["spearman_prot_mean"] = r["spearman_prot_mean"]
+    row["n_variants"] = int(df[model].notna().sum())
+    if "FoldX" in df and model != "FoldX":            # per-protein win/loss vs FoldX (critique #2 3.3)
+        both = df[df.FoldX.notna() & df[model].notna()]
+        a, b_ = per_protein_rho(both, model, target), per_protein_rho(both, "FoldX", target)
+        j = pd.concat([a.rename("a"), b_.rename("b")], axis=1).dropna()
+        row["win_vs_foldx"], row["n_prot_pairs"] = int((j.a > j.b).sum()), int(len(j))
     if n_boot:
         ci = E.bootstrap_ci(df, model, target=target, n_boot=n_boot)
         for k in METRICS[2:]:
@@ -513,7 +561,11 @@ def stage_eval(n_boot=1000):
     mains = ["B4", "B5", "B6g", "B6gs1", "B6gaf", "B6x"]
     tasks, cov, strata_rows, stab_rows = [], [], [], []
     for bench, subs in SUBSETS.items():
-        b = add_extra(add_phys(L.bench_table(bench), bench, EVAL_CAP), bench)
+        b = L.bench_table(bench)
+        if bench == "domainome" and "homolog_in_fireprot_trainval" not in b:   # needed for per-model strict (3.4)
+            h = pd.read_csv(L.PROC / "homology_domainome.csv")[["protein_id", "homolog_in_fireprot_trainval"]]
+            b = b.merge(h, on="protein_id", how="left")
+        b = add_extra(add_phys(b, bench, EVAL_CAP), bench)
         b["cxxc"] = cxxc_flags(b)
         P = predict_models(models, b)
         b = attach_competitors(pd.concat([b, P], axis=1), bench)
@@ -528,9 +580,18 @@ def stage_eval(n_boot=1000):
         low_cov = {c for c in cols if b[c].notna().mean() < 0.95}
         tab_cols = [c for c in cols if c not in low_cov]
         for sub, expr in subs.items():
+            per_model = "strict" in sub and "homolog_in_megascale_train==0" in expr
             d = E.apply_subset(b, expr)
             common = d[tab_cols].notna().all(axis=1) if tab_cols else pd.Series(False, index=d.index)
             for c in cols:
+                if per_model:     # redo the subset with this model's own training sets (critique #2 3.4)
+                    e2 = expr.replace(MS_ONLY_STRICT, strict_expr(c, bench)) if strict_expr(c, bench) != MS_ONLY_STRICT else expr
+                    if e2 != expr and all(col in b for col in ("homolog_in_fireprot_trainval",)):
+                        d = E.apply_subset(b, e2)
+                        common = d[tab_cols].notna().all(axis=1) if tab_cols else pd.Series(False, index=d.index)
+                    else:
+                        d = E.apply_subset(b, expr)
+                        common = d[tab_cols].notna().all(axis=1) if tab_cols else pd.Series(False, index=d.index)
                 cc = [x for x in (comps + mains) if x in d and x != c] if c in mains else []
                 use = list(dict.fromkeys(KEYS + ["ddg", "cluster", c] + cc + (["score"] if "score" in d else [])))
                 want_boot = nb if (c in mains + comps or sub in ("all", "natural")) else 0
@@ -923,7 +984,7 @@ def stage_report():
             ("s669", "strict", "pearson", "S669-strict r", True), ("s461", "strict", "pearson", "S461-strict r", True),
             ("domainome", "all", "spearman_prot_median", "Dom ρ_dom", True),
             ("abundance_dms", "all", "spearman_prot_median", "Abund ρ", False)]
-    order = ["B3+", "B4", "B5", "B6gs1", "B6g", "B6gaf", "B6x",
+    order = ["B3+", "B4", "B5", "B6gs1", "B6g", "B6gaf", "B6gj", "B6gjs1", "B6g-refzero", "B6g-noref", "B6g-floor", "B6x",
              "B4-capC", "B4-capC-soft", "B4-noenv", "B4-phys", "B4-dF", "B4-odd", "B4j", "B4j+C",
              "B5-noenv", "B5-phys",
              "B5-dF", "B5-odd", "B5j", "B5j+C", "FoldX", "FoldX-clip", "tmol-refit", "KORPM", "DDGun3D"]
@@ -953,6 +1014,19 @@ def stage_report():
     ns = {lab: int(com[(com.bench == b) & (com.subset == sub) & (com.model == "B4")].n.iloc[0])
           for b, sub, k, lab, _ in cols if len(com[(com.bench == b) & (com.subset == sub) & (com.model == "B4")])}
     md += ["", "Rows per column (identical across models): " + ", ".join(f"{k} {v:,}" for k, v in ns.items()), ""]
+    # mean / median / n / win-loss vs FoldX on the primary subset (critique #2 3.3)
+    pr = com[(com.bench == "megascale") & (com.subset == "natural")]
+    md += ["### Megascale-test natural: median AND mean per-protein rho, with per-protein wins over FoldX", "",
+           "| model | median rho_prot | mean rho_prot | n proteins | n variants | beats FoldX on |", "|---|---|---|---|---|---|"]
+    for mod in order:
+        x = pr[pr.model == mod]
+        if not len(x):
+            continue
+        x = x.iloc[0]
+        w = f"{int(x.win_vs_foldx)}/{int(x.n_prot_pairs)}" if np.isfinite(x.get("win_vs_foldx", np.nan)) else "–"
+        md.append(f"| {mod} | {x.spearman_prot_median:.3f} | {x.spearman_prot_mean:.3f} | {int(x.n_proteins)} | "
+                  f"{int(x.n):,} | {w} |")
+    md.append("")
     # FireProt on ALL rows: the identical-row intersection excludes the two 2TRX disulfide rows (tmol and FoldX
     # fail on them), which is exactly where the test-informed CXXC exception acts. Shown explicitly (audit item 1).
     fp = own[(own.bench == "fireprot") & (own.subset == "all")]
