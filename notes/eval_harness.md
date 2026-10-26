@@ -59,3 +59,7 @@ Tests: `.venv/bin/python -m pytest tests`.
 ## Numbers so far (Megascale test, 28 proteins, 28,172 variants)
 FoldX 5.1: Spearman 0.569 [0.53, 0.61], per-protein median 0.633, Pearson 0.447, AUROC(ddg>1) 0.829, RMSE 3.17 (0.94 after linear fit).
 Trivial baselines (Spearman pooled): burial 0.468, burial_absvol 0.343, burial_blosum 0.337, nc_kd 0.310, kd 0.304, blosum 0.159, vol 0.135.
+
+FireProt test (347 rows, 27 proteins; FoldX covers 341 rows / 25 proteins = 98.3%, so the harness warns): FoldX Spearman 0.449 [0.28, 0.59],
+per-protein median 0.634, Pearson 0.411, AUROC(ddg>1) 0.771, RMSE 2.32. Trivial (Spearman): burial 0.314, vol 0.253, burial_kd 0.209, nc_kd 0.206, kd 0.185.
+Not yet run: domainome, s669, ssym (tables absent when this was written).
