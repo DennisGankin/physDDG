@@ -33,8 +33,11 @@ record (`scripts/20_download_domainome_supp.sh`).
   chain A, UniProt numbering, B-factor = pLDDT. `af_full_structure` = unchanged copy of the AF model (fragment) used.
 * AF source: human proteome **v4** (`/af_data/af2`, 502 domains); AF DB **v6** for the 15 non-human Swiss-Prot entries
   (`swissprot_pdb_v6.tar`) and A2RRE5 (absent from the v4 human set; EBI download). `af_version` column records it.
-  **v4 and v6 human coordinates differ** (re-predicted; e.g. max atom deviation 48–77 Å on whole chains, mostly in
-  disordered parts), so the version matters; the FoldX runs' AF version is not recorded in /foldx_native_clean.
+  v4 vs v6 (human v6 is a separate release; `scripts/26_domainome_v4_v6.py`, `domainome_af_v4_v6.csv`): over the
+  497 constructs with identical sequence in both, CA RMSD median 0.13 Å, 95th pct 1.0 Å, 6 constructs > 2 Å
+  (all low pLDDT, ρ(RMSD, pLDDT) = −0.60); 3 constructs have a changed v6 sequence (P57071, P20929, Q14863).
+  v6 crops are in `data/structures/domainome/af_construct_v6/` as an alternative AF model for robustness tests.
+  The AF version used by the FoldX runs is not recorded in /foldx_native_clean.
 * 19 domains sit in proteins > 2,700 aa (AF fragments); the fragment in which the construct is most central was used.
 * pLDDT over measured positions: median 90.2, 5th pct 67.5; 6.1% of positions < 70, 1.3% < 50.
   Per-domain fraction of construct residues with pLDDT < 70: median 0.022, 90th pct 0.17; 43 domains > 20 %, 2 > 50 %.
@@ -63,7 +66,7 @@ use for grouped CV; cross-dataset homology clustering is item 2.4.
 * Construct run: `foldx_native_domainome_construct.csv` key (`entity_id`, `position_1based`, `wt_aa`, `mut_aa`) =
   (`protein_id`, `domainome_position`, `wt`, `mut`). Its `pdb_resnum` = `domainome_position` = our `pdb_resnum` for all
   matched rows (chain A). `in_foldx_construct` flags coverage. Missing domains: the 3 designs, P03034, Q13472 (both),
-  A0A2R8Y422, P57071, Q14863, Q3SY89 and 18 constructs from AF-fragmented proteins.
+  A0A2R8Y422, P57071, Q14863, Q3SY89 and all 19 constructs from AF-fragmented proteins.
 * Full-length run: `foldx_native_domainome.csv` key (`entity_id`=`uniprot`, `position_1based`=`domainome_position`, wt, mut);
   `in_foldx_full`.
 
