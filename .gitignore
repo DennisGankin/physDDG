@@ -11,3 +11,7 @@ results/baselines/*.csv
 data/structures/
 data/processed/domainome.csv
 data/processed/domainome.parquet
+# data-HT large regenerable tables (scripts/11_build_megascale.py)
+data/processed/megascale.parquet
+data/processed/megascale.csv.gz
+data/processed/megascale_doubles.csv.gz

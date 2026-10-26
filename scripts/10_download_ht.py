@@ -8,7 +8,8 @@ Sources (all public, no auth):
                 Processed_K50_dG_datasets.zip (1.0 GB) -> extracted
   korpm/        S669.txt, S461.txt, KORPM_Ssym.txt from github.com/chaconlab/korpm (Martin-Hernandez et al. 2023,
                 the authors of S461)
-  prostata/     S2648.csv from github.com/mitiau/PROSTATA (Dehouck 2009 S2648 with PDB chain, pH, T)
+  prostata/     S2648.csv from github.com/mitiau/PROSTATA (Dehouck 2009 S2648 with PDB chain, pH, T) and
+                the ACDC-NN Ssym direct folds (third copy of Ssym values for cross-checking)
   thermonet/    s_sym.txt (Ssym, Pucci 2018, as distributed with ThermoNet) for cross-checking
   tools/        MMseqs2 release 18-8cc5c static binary (linux avx2)
 
@@ -30,7 +31,8 @@ FILES = {
         "megascale_vs_fireprot_homologues.m8", "s669_vs_megascale_homologues.m8"]],
     "korpm": [f"{GH}/chaconlab/korpm/main/{f}" for f in [
         "S461.txt", "S461_results/S669.txt", "KORPM_Ssym.txt", "S461_results/S461.xlsx", "README.md"]],
-    "prostata": [f"{GH}/mitiau/PROSTATA/main/DATA/S2648.csv"],
+    "prostata": [f"{GH}/mitiau/PROSTATA/main/DATA/S2648.csv"] +
+                [f"{GH}/mitiau/PROSTATA/main/DATA/Ssym_cv.acdc.mut/ssym_TS_dir_{i}.mut" for i in (0, 1, 2, 4, 5, 6, 7, 8)],
     "thermonet": [f"{GH}/gersteinlab/ThermoNet/master/data/datasets/s_sym.txt"],
 }
 TSUBO = ("https://zenodo.org/api/records/7992926/files/Processed_K50_dG_datasets.zip/content",
