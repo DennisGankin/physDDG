@@ -12,7 +12,10 @@ Decisions are logged as D<n> (see bottom). Dates are 2026.
   - [!] 1.1a Site-only oracle (LOO site mean) = 0.757 pooled ρ on Megascale-test; site+aa additive 0.800 → per-site sensitivity is where the accuracy lives (lit agent, scripts/lit_*.py)
   - [-] 1.1b Refitting FoldX's 22 terms under grouped CV is worse than stock FoldX (0.541 vs 0.569): reweighting FoldX-style terms is a dead end
   - [ ] 1.1c Competitor baselines KORPM, DDGun3D on our tables (agent: competitors)
-  - [ ] 1.1d tmol (GPU Rosetta REF2015, Apache-2.0) evaluation as engine/baseline (agent: tmol)
+  - [x] 1.1d tmol 0.2.0 (beta_nov2016, GPU) as reference engine — notes/tmol_eval.md
+    - Megascale-test: raw 0.492 (rep. blow-ups, Pearson 0.18); 12-term refit + 20 ref energies 0.596 (per-prot 0.626), ≈ FoldX / B3+; 3.1 min per 349-res scan (ours stage 2: 18.7 s per 490 res, 13-50x faster)
+    - [!] tmol-refit correlates only 0.76 with B3+ and 0.66 with FoldX; equal-weight sums gain ~+0.03 over B3+ (indicative, test z-scores)
+    - [-] Not adopted as engine (too slow, Rosetta-style clashes); kept as baseline. Open: Dunbrack-in-tmol licence unresolved
 - D12 (10-26) Primary fit on Megascale-train only (val for selection); FireProt-train only for G6 transfer check / optional joint variant; all other sets held out.
 - D13 (10-26) AF side chains: repack only site + shell (lit evidence that AF side chains beat packers on AF backbones) — global repack only as an ablation.
 
