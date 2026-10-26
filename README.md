@@ -23,15 +23,16 @@ Command line:
 ```bash
 scripts/physddg predict --structure 1abc.pdb --mutations "A12G,L45P,B:K7E" --out preds.csv
 scripts/physddg predict --structure model.cif --scan-all --sites 10-80 --gpus 0,1 --terms --out scan.csv
-scripts/physddg predict --structure AF-P12345-F1.pdb --mode af --scan-all --out af_scan.csv     # stage 2 (B5)
+scripts/physddg predict --structure AF-P12345-F1.pdb --mode af --crop A:30-140 --scan-all --out af_scan.csv
 scripts/physddg predict --table variants.csv --gpus 0,1,2,3 --out preds.csv   # columns structure,chain,pdb_resnum,wt,mut
 ```
 Python:
 ```python
 from physddg.predict import PhysDDG
-m = PhysDDG()                       # stage 1, weights results/ladder_physics/models/B4.json
+m = PhysDDG()                       # stage 1 (default): final_stage1.json, else B6gs1.json
 df = m.predict("1abc.pdb", ["A12G", "L45P"], terms=True)
-m2 = PhysDDG(stage=2)               # stage 2, B5; or PhysDDG(weights="path/to/model.json")
+m2 = PhysDDG(stage=2)               # stage 2: final_stage2.json, else B6g.json; or PhysDDG(weights="model.json")
+m3 = PhysDDG(mode="af")             # AF mode (D18): final_af.json, else B6gaf.json; m3.predict(f, ..., crop="A:30-140")
 ```
 Mutation syntax: `<wt><resnum>[icode]<mut>`, optionally prefixed by the chain (`B:L45P`); residue numbers are the
 author numbering of the file. Output columns: `ddg`, `site_found`, `wt_match`, `flags`, and with `--terms` the
@@ -39,15 +40,22 @@ per-term contributions `c_<feature>` (weight × feature), `c_ref` (reference ene
 is `ddg`. WT→WT is exactly 0.
 
 Flags (`;`-separated, empty = none): `wt_mismatch`, `site_not_found`, `site_missing_atoms`, `missing_atoms_8A`,
-`hetatm_5A` (ligand/metal near the site: not modelled), `chain_break_10A`, `terminal` (≤ 2 residues from a chain end),
-`low_plddt` (< 70, `--mode af` only) plus the AF-mode flags of `physddg/afmode.py` when available.
+`hetatm_5A` (ligand/metal near the site: not modelled), `chain_break_10A`, `terminal` (≤ 2 residues from a chain end).
+AF mode adds `low_plddt` (< 70), `very_low_plddt` (< 50), `near_low_plddt`, `terminal` (< 3 from an end),
+`exposed_hydrophobic_patch` (missing partner), `metal_site` (Cys/His cluster), `site_trimmed` (the site lies in a
+trimmed low-confidence segment; scored on the untrimmed model) and a boolean column `withheld`
+(pLDDT < 70 ∪ terminal ∪ exposed hydrophobic patch ∪ metal site; recommended: do not use these numbers).
+Weights are chosen by `physddg.predict.default_weights` (the fitting agent's `final_*.json`, else the B6g family);
+the JSON schema and feature contract are in `results/ladder_physics/models/README.md`.
 
 ## Modes
 | mode | what is computed | weights | use |
 |---|---|---|---|
-| stage 1 (default) | every rotamer of the 20 residue types at the site in the fixed native environment; Boltzmann free energy and averaged terms | B4 | crystal structures, fastest |
-| stage 2 | stage 1 + mean-field repacking of the side chains within 6 Å (identical sets for WT and mutant) | B5 | AlphaFold models, buried small→large substitutions |
-| `--mode af` | stage 2 + flags for pLDDT < 70 / low-confidence neighbourhoods (see `notes/af_mode.md`; withhold flagged sites) | B5 | predicted structures |
+| stage 1 (default) | every rotamer of the 20 residue types at the site in the fixed native environment; Boltzmann free energy and averaged terms, + structure statistics, N-cap and helix-dipole terms | B6gs1 | crystal structures, fastest |
+| stage 2 | stage 1 + mean-field repacking of the side chains within 6 Å (identical sets for WT and mutant) | B6g | best accuracy; buried small→large substitutions |
+| `--mode af` (D18) | optional construct crop (`--crop`, equivalent to a construct file of that range) → MAVISp-style trim of low-pLDDT 10-residue windows (< 50) and termini (< 70), packed segments exempt → stage 2 (AF side chains kept outside the 6 Å shell) → pLDDT attenuation (two-stage `scale_plddt`) → AF flags + `withheld` | B6gaf | AlphaFold models (B-factor = pLDDT) |
+pLDDT attenuation is applied only when the structure is labelled as an AF model (`--mode af`); crystal input
+(`--mode xtal`, the default) never uses it, even with AF weights.
 
 The site is always modelled from library rotamers (the WT side chain at the mutated site is never reused), so WT and
 mutant go through the same code path. The backbone is fixed.
@@ -66,22 +74,28 @@ mutant go through the same code path. The backbone is fixed.
 - Weights were fitted on Megascale (small domains, 25 °C, proteolysis-derived ΔG); absolute scale for other assays
   differs (FireProt ΔΔGs are ~1.7× larger). pH, temperature and salt are not inputs.
 
-## Speed (one RTX 4090 unless noted; end to end incl. loading/annotation; `scripts/59_speed_benchmark.py`)
-Full saturation scans (19 × L variants), wall clock incl. loading, annotation, features and scoring; 1 GPU =
-in-process with the model loaded (cold CLI start adds ≈ 4 s); 4 GPUs = sites sharded over one process per GPU
-(includes ≈ 5 s process spawn + CUDA init, so it only pays off for large proteins / stage 2).
+## Speed (RTX 4090; end to end incl. loading, annotation, all features and scoring; `scripts/59_speed_benchmark.py`)
+Shipped weights (`final_stage1/2/af.json` = B6gs1 / B6g / B6gaf). Full saturation scans (19 × L variants); 1 GPU =
+in-process with the model loaded (cold CLI start ≈ 8 s); 4 GPUs = sites sharded over one process per GPU (includes
+≈ 5 s process spawn + CUDA init, so it only pays off for large proteins or stage 2).
 
-| protein (observed residues) | variants | stage 1, 1 GPU | stage 1, 4 GPUs | stage 2, 1 GPU | stage 2, 4 GPUs | FoldX 5.1 (5–10 CPU-s/mut) | KORPM (0.44 ms/mut, 1 core) |
+| protein (residues) | variants | stage 1, 1 GPU | stage 1, 4 GPUs | stage 2, 1 GPU | stage 2, 4 GPUs | FoldX 5.1 (5–10 CPU-s/mut) | KORPM (0.44 ms/mut, 1 core) |
 |---|---|---|---|---|---|---|---|
-| 7A38 A (59) | 1,121 | **0.6 s** (1,985/s) | 4.9 s | 1.7 s (664/s) | 6.2 s | 1.6–3.1 CPU-h | 0.5 s |
-| 1ZD0 A (141) | 2,679 | **1.4 s** (1,903/s) | 5.7 s | 3.9 s (695/s) | 7.4 s | 3.7–7.4 CPU-h | 1.2 s |
-| 6Q62 A (269) | 5,111 | **2.9 s** (1,775/s) | 6.4 s | 7.2 s (715/s) | 8.1 s | 7–14 CPU-h | 2.2 s |
-| 3EDF A (597) | 11,343 | **7.8 s** (1,460/s) | 8.8 s | 21.0 s (541/s) | 12.8 s | 16–32 CPU-h | 5.0 s |
+| 7A38 A (59) | 1,121 | **0.8 s** | 5.2 s | 2.0 s | 7.1 s | 1.6–3.1 CPU-h | 0.5 s |
+| 1ZD0 A (141) | 2,679 | **2.5 s** | 9.3 s | 4.9 s | 10.3 s | 3.7–7.4 CPU-h | 1.2 s |
+| 6Q62 A (269) | 5,111 | **4.8 s** | 9.3 s | 10.1 s | 10.4 s | 7–14 CPU-h | 2.2 s |
+| 3EDF A (597) | 11,343 | **13.1 s** | 13.5 s | 26.5 s | 17.0 s | 16–32 CPU-h | 5.0 s |
 
-Whole benchmark tables on 4 GPUs (run_jobs: one process per GPU, CPU preparation overlapped):
-Megascale-test 28,172 variants / 28 structures: stage 1 **9.5 s** (2,957/s), stage 2 17.1 s;
-Domainome 532,501 variants / 518 structures: stage 1 **55 s** (9,719/s), stage 2 172 s (3,105/s).
-Target (300-residue saturation scan < 1 min on one 4090, stage 1) met with ~20× margin.
+AF mode (crop/trim + stage 2 + attenuation + flags), 1 GPU, AlphaFold DB yeast models: 150 res 11.2 s, 298 res 23.9 s,
+603 res 42.7 s (≈ 240–270 variants/s; trimming re-annotates the model and scores trimmed sites on the untrimmed one).
+Stage 1 time is about half CPU (the B6 site descriptors of `physddg/features_extra.py`, ≈ 2 s per 270 residues,
+pure-Python loops) and half GPU (engine). Whole tables on 4 GPUs (one process per GPU, CPU preparation overlapped):
+Megascale-test 28,172 variants: stage 1 23.5 s, stage 2 19.9 s; Domainome 532,501 variants: stage 1 **63 s**
+(8,450/s), stage 2 203 s, AF mode 207 s. Target (300-residue saturation scan < 1 min on one 4090, stage 1) met.
+
+Example outputs (`--scan-all --terms`): `results/examples/1PSE_megascale_scan_stage1.csv` (crystal/Megascale domain,
+stage 1), `results/examples/AF-A0A2R8Y422_PF00240_crop2-71_scan_af.csv` (AF model cropped to the Domainome
+construct) and `results/examples/AF-P20486_yeast_scan_af.csv` (full AF model with trimming, flags, `withheld`).
 
 ## Reproducibility (every result comes from a script; run with `PYTHONPATH=. .venv/bin/python scripts/<script>`)
 | step | scripts | outputs |

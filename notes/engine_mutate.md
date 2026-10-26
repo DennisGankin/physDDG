@@ -202,3 +202,42 @@ a float32 guard (`_float32`).
 - Issue for the fitting agent: `physddg/fit.py` sets torch's global default dtype to float64 at import; pytest
   collects tests/test_fit.py before test_energy.py runs, so `tests/test_energy.py::test_site_dependent_cap` fails in a
   full `pytest tests/` run (passes alone). mutate/predict are guarded; the fix belongs in fit.py (local dtype).
+- **R-fit3 (loader, D19 final models):** the shipped models are now
+  `results/ladder_physics/models/final_stage2.json` (= B6g, default), `final_stage1.json` (= B6gs1, fast mode) and
+  `final_af.json` (= B6gaf, AF inputs only). Schema details in `results/ladder_physics/models/README.md`. Two things
+  `physddg/predict.py` must handle:
+  1. **New feature columns** `ncap_pref` and `helix_dipole`, produced by `physddg/features_extra.py`
+     (`site_table` for the site descriptors `x_ncap`, `x_n1..3`, `x_c1..3`, then `candidate_features`). `ncap_pref`
+     reads the PDB-derived table `physddg/data/ncap_pref.json` (built by `scripts/53_ncap_stats.py`). A loader that
+     does not compute them raises a KeyError — please do not fill them with 0 silently.
+  2. **Attenuated models** carry `scale_kind` (currently only `"plddt"`) and an embedded core model `scale_base`.
+     Prediction is two-stage: `core = predict(scale_base, x)`, then `x["scale_plddt"] = core * flag_lowplddt`, then
+     `predict(model, x)`. `flag_lowplddt = 1 - pLDDT/100` **only** for AF models whose per-structure mean B-factor is
+     in [30, 100]; it is 0 for crystal structures and for design models with B = 0. Branch on `scale_kind`; never apply
+     an attenuated model to crystal inputs (the term is 0 there anyway, but the intent should be explicit).
+  The old `B6*.json` files (B6, B6s1, B6af, B6af_s1, B6hb, B6d15, B6j) are removed; `B6x.json` (with site_scsc) is
+  kept for transparency only. `B4.json` / `B5.json` are unchanged in schema.
+
+## v4 (2026-10-26): B6 models, AF mode (D18), final benchmark
+- Weights: `physddg.predict.default_weights(stage, mode)` → `final_stage1/2/af.json` (fitting agent; currently copies
+  of B6gs1 / B6g / B6gaf), else the B6g family, else B4/B5.
+- B6 feature groups: `features_extra.site_descriptors(file)` → `x_`-prefixed merge on (chain, resnum) →
+  `features_extra.candidate_features` (the same steps as `52.add_extra`); `struct_source` is passed through
+  ('xtal' default, 'af' in AF mode, or the table's label) because the pLDDT term is only active for AF-labelled
+  structures. Two-stage attenuation: `scale_<kind>` = predict(scale_base) × f (f = flag_lowplddt for 'plddt',
+  1 − RSA for 'burial'), then the outer model. Crystal input (mode xtal) never attenuates (test).
+- Reproduction: predict() vs the fitting agent's stored predictions (preds_*.parquet, 20:31 issue) on two proteins
+  each: B6gs1 Megascale exact (0), B6g / B6gaf ≤ 1.0e-5 (Megascale and Domainome); also checked against an
+  independent run of 52.predict_models on freshly merged features (≤ 1.0e-5). Tests in tests/test_mutate.py.
+- AF mode (D18, `PhysDDG(mode='af')`, CLI `--mode af [--crop A:10-120] [--no-trim]`): crop = exactly a construct
+  file of that range (dihedrals not carried over from the full model; boundaries are real termini) — verified:
+  cropping the full v4 model to the Domainome construct range reproduces the construct-file predictions exactly;
+  then `afmode.trim_mask` with the MAVISp preset (10-residue window < 50, termini < 70, packed-exempt), trimmed model
+  via `afmode.trim_protein` (dihedrals preserved, no invented termini: `afmode.site_scan`), files for the
+  file-based feature code via `afmode.write_trimmed_pdb`; sites inside trimmed segments are scored on the untrimmed
+  model and flagged `site_trimmed`; stage 2; AF weights (attenuation); flags from `afmode.flags`; `withheld` =
+  low_plddt | terminal | exposed_hydrophobic_patch | metal_site. Note: the stored B6gaf predictions were made
+  without trimming, so the reproduction test uses `trim=False`.
+- Speed (README table): stage-1 300-residue scan 4.8 s (was 2.9 s with B4: the new B6 site descriptors add ≈ 2 s
+  of CPU per 270 residues — pure-Python loops in features_extra.site_descriptors, a candidate for vectorisation by
+  its owner); Domainome 532k variants 63 s (stage 1) / 203 s (stage 2) / 207 s (AF mode) on 4 GPUs.

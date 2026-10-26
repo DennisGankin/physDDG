@@ -2,11 +2,13 @@
 """PhysDDG command line.
 
   physddg predict --structure X.pdb|cif [--chain A] (--mutations "A12G,L45P" | --scan-all [--sites 10-80])
-                  [--mode xtal|af] [--stage 1|2] [--weights model.json] [--gpus 0,1] [--terms] --out preds.csv
+                  [--mode xtal|af] [--crop A:10-120] [--no-trim] [--stage 1|2] [--weights model.json] [--gpus 0,1]
+                  [--terms] --out preds.csv
   physddg predict --table variants.csv --gpus 0,1,2,3 --out preds.csv   (columns: structure, chain, pdb_resnum, wt, mut)
 
-ddg in kcal/mol, positive = destabilising. Stage 1 (default) = fixed environment, model B4; stage 2 = flexible
-neighbours, model B5 (recommended for AlphaFold models: --mode af implies --stage 2 unless given).
+ddg in kcal/mol, positive = destabilising. Weights: physddg.predict.default_weights (final_* files, else B6g family):
+stage 1 (default, fast) = fixed environment; stage 2 = flexible neighbours; --mode af (D18) = construct crop (optional),
+MAVISp-style trim, stage 2, pLDDT attenuation, AF flags and a `withheld` column.
 """
 import os
 
@@ -32,6 +34,8 @@ def main():
     g.add_argument("--scan-all", action="store_true", help="all 19 substitutions at every (selected) site")
     p.add_argument("--sites", help="with --scan-all: residue numbers/ranges, e.g. 10-80,95")
     p.add_argument("--mode", choices=["xtal", "af"], default="xtal")
+    p.add_argument("--crop", help="AF mode: keep only these residues, e.g. A:10-120 (assayed construct / domain)")
+    p.add_argument("--no-trim", action="store_true", help="AF mode: do not trim low-pLDDT windows / termini")
     p.add_argument("--stage", type=int, choices=[1, 2])
     p.add_argument("--weights")
     p.add_argument("--gpus", default="0")
@@ -52,10 +56,15 @@ def main():
     else:
         if not a.structure or not (a.mutations or a.scan_all):
             ap.error("--structure and one of --mutations/--scan-all are required (or --table)")
-        m = P.PhysDDG(a.weights, stage, f"cuda:{gpus[0]}", a.mode)
+        m = P.PhysDDG(a.weights, stage, f"cuda:{gpus[0]}", a.mode, trim=False if a.no_trim else None)
         prot = m.load(a.structure)
         rows = m._rows(prot, a.structure, a.mutations, a.chain, a.scan_all, a.sites)
-        if len(gpus) > 1:
+        if a.scan_all and a.crop:
+            keep = {k for k, c in zip(prot.keys, P.crop_mask(prot, a.crop)) if c}
+            rows = rows[[(c, r) in keep for c, r in zip(rows.chain, rows.pdb_resnum)]].reset_index(drop=True)
+        if a.mode == "af" and (a.crop or m.trim):
+            out = m.predict(a.structure, rows=rows, prot=prot, terms=a.terms, crop=a.crop)
+        elif len(gpus) > 1:
             out = P.run_jobs(P.shard_sites(a.structure, rows, len(gpus)), gpus, a.weights, stage, a.mode, 1, a.terms)
         else:
             out = m.predict(a.structure, rows=rows, prot=prot, terms=a.terms)

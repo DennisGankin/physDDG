@@ -466,6 +466,9 @@ class PhysDDG:
         t1 = time.time()
         if rows is None:
             rows = self._rows(prot, structure, mutations, chain, scan_all, sites)
+            if scan_all and crop:                    # saturation scan of the cropped construct only
+                keep = {k for k, m in zip(prot.keys, crop_mask(prot, crop)) if m}
+                rows = rows[[(c, r) in keep for c, r in zip(rows.chain, rows.pdb_resnum)]].reset_index(drop=True)
         else:
             rows = rows.assign(structure=str(structure), chain=rows.chain.astype(str),
                                pdb_resnum=rows.pdb_resnum.astype(str))
