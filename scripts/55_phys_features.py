@@ -93,7 +93,8 @@ def gpu_worker(gpu: int, jobs: list, stage: int, cdir: str, cpus: int, log: str,
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu)
     import torch
     from concurrent.futures import ProcessPoolExecutor
-    from physddg.mutate import SiteScan, stat_features
+    from physddg.mutate import SiteScan
+    from physddg.predict import site_arrays
     torch.backends.cuda.matmul.allow_tf32 = False
     cfg = make_cfg(variant)
     rows = []
@@ -109,17 +110,12 @@ def gpu_worker(gpu: int, jobs: list, stage: int, cdir: str, cpus: int, log: str,
             t0 = time.time()
             torch.cuda.reset_peak_memory_stats()
             sc = SiteScan(p, cfg, "cuda")
-            res = sc.stage1(idx) if stage == 1 else sc.stage2(idx)
+            z = site_arrays(p, idx, sc, stage)
             torch.cuda.synchronize()
             dt = time.time() - t0
-            st = stat_features(p, idx, cfg.kT)
-            arrs = {k: v for k, v in res.items() if isinstance(v, np.ndarray)}
-            arrs.update({f"stat_{k}": v for k, v in st["per_aa"].items()})
-            arrs.update({f"ctx_{k}": np.asarray(v) for k, v in st["context"].items()})
-            np.savez(out, chain=p.chain[idx], resnum=p.resnum[idx], aa=np.array(list(p.seq))[idx],
-                     terms=np.array(sc.terms), **arrs)
+            np.savez(out, **z)
             rows.append(dict(structure=structure, L=len(p), n_sites=len(idx), n_variants=19 * len(idx), seconds=dt,
-                             n_rot=int(res["n_rot"].sum()) if "n_rot" in res else -1,
+                             n_rot=int(z["n_rot"].sum()) if "n_rot" in z else -1,
                              gpu_mem_gb=torch.cuda.max_memory_allocated() / 1e9, gpu=gpu))
             if len(rows) % 20 == 0:
                 print(f"[gpu{gpu}] {len(rows)}/{len(jobs)} last L={len(p)} sites={len(idx)} {dt:.2f}s", flush=True)
@@ -155,76 +151,14 @@ def compute(structures: dict, stage: int, cdir: Path, gpus: list[int], cpus: int
 
 # ----------------------------------------------------------------------------- assembly
 def assemble(name: str, rows: pd.DataFrame, stage: int, cdir: Path) -> pd.DataFrame:
-    pre = "s1" if stage == 1 else "s2"
+    """Variant columns per dataset row from the per-structure cache (physddg.predict.engine_columns)."""
+    from physddg.predict import engine_columns
     parts = []
     for structure, g in rows.groupby("structure", sort=False):
         f = cache_file(cdir, structure)
         z = dict(np.load(f, allow_pickle=False)) if f.exists() else {}
-        out = g[KEYS + ["structure"]].copy()
-        if "chain" not in z:
-            out["site_found"] = False
-            parts.append(out)
-            continue
-        key = {(c, r): i for i, (c, r) in enumerate(zip(z["chain"].tolist(), z["resnum"].tolist()))}
-        si = np.array([key.get((c, r), -1) for c, r in zip(g.chain, g.pdb_resnum)])
-        ok = si >= 0
-        iw = g.wt.map(T.AA_INDEX).to_numpy()
-        im = g.mut.map(T.AA_INDEX).to_numpy()
-        s_, w_, m_ = si[ok], iw[ok], im[ok]
-        out["site_found"] = ok
-        out["wt_match"] = False
-        out.loc[ok, "wt_match"] = z["aa"][s_] == g.wt.to_numpy()[ok]
-        cols = {}
-
-        def d(arr):
-            return arr[s_, m_] - arr[s_, w_]
-
-        terms = [str(t) for t in z["terms"]]
-        kT = 0.593
-        cols[f"{pre}_dF"] = d(z["F"])
-        for k in ("U_min", "prior_avg"):
-            if k in z:
-                cols[f"{pre}_d{k}"] = d(z[k])
-        if "S_site" in z:
-            cols[f"{pre}_dTS"] = kT * d(z["S_site"])
-        if "S_local" in z:                                        # stage 2: mean-field entropy of the local region
-            cols[f"{pre}_dTS"] = kT * d(z["S_local"])
-        if "n_nb" in z:
-            cols[f"{pre}_n_nb"] = z["n_nb"][s_]
-            cols[f"{pre}_nb_native_frac_wt"] = z["nb_native_frac"][s_, w_]
-        for j, t in enumerate(terms):
-            cols[f"{pre}_dE_{t}"] = d(z["E_avg"][..., j])
-            if "E_min" in z:
-                cols[f"{pre}_dEmin_{t}"] = d(z["E_min"][..., j])
-        cols[f"{pre}_dref_apolar"] = d(z["ref"][..., 0])
-        cols[f"{pre}_dref_polar"] = d(z["ref"][..., 1])
-        if "n_rot" in z:
-            cols[f"{pre}_nrot_wt"] = z["n_rot"][s_, w_]
-            cols[f"{pre}_nrot_mut"] = z["n_rot"][s_, m_]
-        if "F_env" in z:     # stage 2: site scored in frozen mean-field environments (rows: env state, cols: residue)
-            def fz(arr):     # forward wt->mut in the WT-relaxed environment
-                return arr[s_, w_, m_] - arr[s_, w_, w_]
-
-            def rv(arr):     # reverse mut->wt in the modelled mutant environment
-                return arr[s_, m_, w_] - arr[s_, m_, m_]
-            for tag, fn in (("fz", fz), ("rev", rv)):
-                cols[f"{tag}_{pre}_dF"] = fn(z["F_env"])
-                cols[f"{tag}_{pre}_dprior_avg"] = fn(z["prior_env"])
-                cols[f"{tag}_{pre}_dTS"] = kT * fn(z["S_env"])
-                for j, t in enumerate(terms):
-                    cols[f"{tag}_{pre}_dE_{t}"] = fn(z["E_env"][..., j])
-            cols[f"sym_{pre}_dF"] = 0.5 * (cols[f"fz_{pre}_dF"] - cols[f"rev_{pre}_dF"])
-        for k in z:
-            if k.startswith("stat_"):
-                cols["d_" + k[5:]] = d(z[k])
-            elif k.startswith("ctx_"):
-                cols["ctx_" + k[4:]] = z[k][s_]
-        for c, v in cols.items():
-            out[c] = np.nan if v.dtype.kind == "f" else None
-            out.loc[ok, c] = v
-        parts.append(out)
-    res = pd.concat(parts).loc[rows.index]
-    return res
+        parts.append(pd.concat([g[KEYS + ["structure"]], engine_columns(z, g, stage)], axis=1))
+    return pd.concat(parts).loc[rows.index]
 
 
 def sanity(stage: int):
