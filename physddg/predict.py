@@ -336,6 +336,13 @@ class PhysDDG:
         t1 = time.time()
         if rows is None:
             rows = self._rows(prot, structure, mutations, chain, scan_all, sites)
+        else:
+            rows = rows.assign(structure=str(structure), chain=rows.chain.astype(str),
+                               pdb_resnum=rows.pdb_resnum.astype(str))
+            if "protein_id" not in rows:
+                rows["protein_id"] = Path(str(structure)).stem
+            if "mutation" not in rows:
+                rows["mutation"] = rows.wt + rows.pdb_resnum + rows.mut
         df = self.features(prot, str(structure), rows, site_tab)
         sc = self.score(df, terms)
         out = rows[[c for c in rows.columns if c != "structure"]].copy()
@@ -379,18 +386,23 @@ def _gpu_worker(gpu: int, jobs: list, weights, stage, mode, cpus: int, terms: bo
     import os
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu)
     from concurrent.futures import ProcessPoolExecutor
-    m = PhysDDG(weights, stage, "cuda", mode)
     outs = []
-    with ProcessPoolExecutor(max(1, cpus)) as ex:                 # CPU prep overlapped with GPU work
-        for structure, rows, prot, tab, err, t_cpu in ex.map(_prep, jobs, chunksize=1):
-            if prot is None:
-                o = rows.drop(columns="structure").assign(ddg=np.nan, flags=f"load_failed:{err}")
-            else:
-                o = m.predict(structure, rows=rows, prot=prot, site_tab=tab, terms=terms)
-                o["gpu"], o["cpu_prep_s"], o["gpu_s"] = gpu, t_cpu, m.timing["engine_s"]
-            o["structure"] = structure
-            outs.append(o)
-    q.put(pd.concat(outs, ignore_index=True) if outs else pd.DataFrame())
+    try:
+        m = PhysDDG(weights, stage, "cuda", mode)
+        with ProcessPoolExecutor(max(1, cpus)) as ex:                 # CPU prep overlapped with GPU work
+            for structure, rows, prot, tab, err, t_cpu in ex.map(_prep, jobs, chunksize=1):
+                try:
+                    if prot is None:
+                        raise RuntimeError(f"load_failed:{err}")
+                    o = m.predict(structure, rows=rows, prot=prot, site_tab=tab, terms=terms)
+                    o["gpu"], o["cpu_prep_s"], o["gpu_s"] = gpu, t_cpu, m.timing["engine_s"]
+                except Exception as e:  # noqa: BLE001  (never lose the other structures)
+                    o = rows.drop(columns=[c for c in ("structure",) if c in rows]).assign(
+                        ddg=np.nan, flags=f"error:{e!r}"[:300])
+                o["structure"] = structure
+                outs.append(o)
+    finally:
+        q.put(pd.concat(outs, ignore_index=True) if outs else pd.DataFrame())
 
 
 def run_jobs(jobs: list, gpus=(0,), weights=None, stage: int | None = None, mode: str = "xtal", cpus: int = 4,
@@ -413,7 +425,17 @@ def run_jobs(jobs: list, gpus=(0,), weights=None, stage: int | None = None, mode
              for g, pj in zip(gpus, parts) if pj]
     for pr in procs:
         pr.start()
-    res = [q.get() for _ in procs]
+    import queue
+    res = []
+    while len(res) < len(procs):
+        try:
+            res.append(q.get(timeout=5))
+        except queue.Empty:
+            dead = [pr for pr in procs if not pr.is_alive() and pr.exitcode not in (0, None)]
+            if dead and q.empty():
+                for pr in procs:
+                    pr.terminate()
+                raise RuntimeError(f"GPU worker(s) died: exit codes {[pr.exitcode for pr in dead]}")
     for pr in procs:
         pr.join()
     return pd.concat(res, ignore_index=True)
