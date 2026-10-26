@@ -38,17 +38,21 @@ KEYS = list(E.KEYS)
 KS = KEYS + ["structure"]
 TERMS = ["lj_atr", "lj_rep", "solv_apolar", "solv_polar", "hb_sc_bb", "hb_sc_sc", "hb_bb_bb", "ELEC", "disulf"]
 STAT = ["d_env_cn_ss_bb", "d_rama", "d_rama_prev"]
-B3P = ["bur", "pro_nhhb", "gly_posphi", "occ_dvol_loss", "ss_broken_nc"]   # B3+ after G6 pruning (no cis-Pro, no dV+)
+B3P_BASE = ["bur", "pro_nhhb", "gly_posphi", "occ_dvol_loss"]   # B3+ after G6 pruning (no cis-Pro, no dV+)
+# D17: the headline models use the plain disulfide indicator. `ss_broken_nc` (catalytic-CXXC exception) is a
+# separate reported variant because the exception was derived from two FireProt-TEST rows (audit item 1).
+SS_FEAT = {False: "ss_broken", True: "ss_broken_nc"}
 # physics sign constraints: every dE term and the rotamer prior destabilise when they increase; -T dS lowers F
 POS = {"lj_atr", "lj_rep", "lj_rep_pro", "solv_apolar", "solv_polar", "hb_sc_bb", "hb_sc_sc", "hb_bb_bb", "elec_dh",
        "elec_bur", "elec_dd", "disulf", "dprior_avg", "dF", "d_env_cn_ss_bb", "d_rama", "d_rama_prev", "bur",
-       "pro_nhhb", "occ_dvol_loss", "ss_broken_nc"}
+       "pro_nhhb", "occ_dvol_loss", "ss_broken", "ss_broken_nc"}
 NEG = {"dTS"}
 
 
 # ----------------------------------------------------------------------------- features
-def add_phys(df: pd.DataFrame, name: str) -> pd.DataFrame:
-    """Merge stage-1 and stage-2 engine features (data/features/phys_s{1,2}_<name>.parquet) onto rows with KEYS+structure."""
+def add_phys(df: pd.DataFrame, name: str, cap: str = "") -> pd.DataFrame:
+    """Merge stage-1/2 engine features onto rows with KEYS+structure. cap in {'', capA, capB, capC} selects E1's
+    D9 repulsion-cap variant for stage 1 (its columns are suffixed `_<cap>` so several can coexist)."""
     out = df
     for s in (1, 2):
         p = pd.read_parquet(FEAT / f"phys_s{s}_{name}.parquet")
@@ -57,6 +61,16 @@ def add_phys(df: pd.DataFrame, name: str) -> pd.DataFrame:
         p = p[KS + keep].drop_duplicates(KS)
         p["pdb_resnum"] = E._norm_resnum(p["pdb_resnum"])
         out = out.merge(p, on=KS, how="left", suffixes=("", f"_s{s}"))
+    if cap:
+        for s in (1, 2):
+            f = FEAT / f"phys_s{s}_{name}_{cap}.parquet"
+            if not f.exists():
+                continue
+            q = pd.read_parquet(f)
+            keep = [c for c in q.columns if c.startswith(f"s{s}_")]
+            q = q[KS + keep].drop_duplicates(KS).rename(columns={c: f"{c}_{cap}" for c in keep})
+            q["pdb_resnum"] = E._norm_resnum(q["pdb_resnum"])
+            out = out.merge(q, on=KS, how="left")
     assert len(out) == len(df)
     return out
 
@@ -80,13 +94,22 @@ def derive(df: pd.DataFrame, stage: int, opts: dict, caps: dict | None = None) -
     pro (none|split), avg (avg|min; stage 1 only)."""
     d = df.copy()
     s = f"s{stage}"
+    cap = opts.get("cap", "")
+    sfx = f"_{cap}" if cap else ""
     mid = "dEmin" if (opts.get("avg") == "min" and stage == 1) else "dE"
     tr = opts["transform"]
     slog = lambda x: np.sign(x) * np.log1p(np.abs(x))
     for t in TERMS:
         name = f"elec_{opts['elec']}" if t == "ELEC" else t
-        x = d[f"{s}_{mid}_{name}"].astype(float)
-        if tr == "slog_all" or (tr == "slog_rep" and t == "lj_rep"):
+        src = f"{s}_{mid}_{name}"
+        if t == "lj_rep" and opts.get("rep") == "soft" and f"{s}_{mid}_lj_rep_soft{sfx}" in d:
+            src = f"{s}_{mid}_lj_rep_soft{sfx}"          # E1's log-softened repulsion (already saturating)
+        elif cap and f"{src}{sfx}" in d:
+            src = f"{src}{sfx}"
+        x = d[src].astype(float)
+        if opts.get("rep") == "soft" and t == "lj_rep":
+            pass                                           # already saturating: no extra transform
+        elif tr == "slog_all" or (tr == "slog_rep" and t == "lj_rep"):
             x = slog(x)
         elif tr.startswith("clip_rep") and t == "lj_rep":
             c = float(tr[8:])
@@ -100,9 +123,11 @@ def derive(df: pd.DataFrame, stage: int, opts: dict, caps: dict | None = None) -
         d["e_lj_rep"] = d["e_lj_rep"] * (1 - isp)
     d["dTS"], d["dprior_avg"] = d[f"{s}_dTS"], d[f"{s}_dprior_avg"]
     d["dref_apolar"], d["dref_polar"] = d[f"{s}_dref_apolar"], d[f"{s}_dref_polar"]
-    d["dF"] = slog(d[f"{s}_dF"]) if tr != "none" else d[f"{s}_dF"]
+    fcol = f"{s}_dF{sfx}" if (cap and f"{s}_dF{sfx}" in d) else f"{s}_dF"
+    d["dF"] = slog(d[fcol]) if tr != "none" else d[fcol]
     if "ss_broken" in d:
-        d["ss_broken_nc"] = d["ss_broken"].fillna(0) * (~d.get("cxxc", pd.Series(False, index=d.index)).astype(bool))
+        d["ss_broken"] = d["ss_broken"].fillna(0)
+        d["ss_broken_nc"] = d["ss_broken"] * (~d.get("cxxc", pd.Series(False, index=d.index)).astype(bool))
     return d
 
 
@@ -115,8 +140,9 @@ def energy_cols(opts) -> list:
 
 
 def feature_set(kind: str, opts: dict) -> tuple[list, dict]:
-    """kind -> (features, extra FitConfig kwargs)."""
+    """kind -> (features, extra FitConfig kwargs). opts['cxxc'] picks the disulfide indicator (D17)."""
     en, refp = energy_cols(opts), (["dref_apolar", "dref_polar"] if opts.get("drefp", True) else [])
+    B3P = B3P_BASE + [SS_FEAT[bool(opts.get("cxxc", False))]]
     sets = {"full": en + STAT + B3P + refp, "noenv": en + STAT[1:] + B3P + refp, "phys": en + refp,
             "dF": ["dF"] + refp, "odd": en + STAT + refp, "odd_sym": en + STAT + refp}
     extra = {"odd": {"intercept": False}, "odd_sym": {"intercept": False, "sym_pair": True}}.get(kind, {})
@@ -144,11 +170,15 @@ def make_cfg(feats, sel, extra=None, constrained=True) -> FT.FitConfig:
 _CACHE = {}
 
 
-def train_tables():
+def train_tables(cap: str = ""):
+    if _CACHE.get("cap", "") != cap:
+        _CACHE.clear()
+        _CACHE["cap"] = cap
     if "train" not in _CACHE:
-        tr = add_phys(L.megascale_train_table("train"), "megascale")
-        va = add_phys(L.megascale_train_table("val"), "megascale")
-        fp = add_phys(L.fireprot_train_table(), "fireprot")
+        cap = _CACHE.get("cap", "")
+        tr = add_phys(L.megascale_train_table("train"), "megascale", cap)
+        va = add_phys(L.megascale_train_table("val"), "megascale", cap)
+        fp = add_phys(L.fireprot_train_table(), "fireprot", cap)
         keep = KS + ["y", "lo", "hi", "sigma_meas", "dataset", "cluster", "domain_origin", "ddg", "cxxc", "rsa", "dvol",
                      "bur", "pro_nhhb", "gly_posphi", "occ_dvol_loss", "ss_broken"]
         out = []
@@ -284,7 +314,10 @@ def stage_ablate():
 
 
 # ----------------------------------------------------------------------------- stage: fit
-MODELS = {  # name -> (stage, kind, joint)
+EVAL_CAP = "capC"          # cap variant whose columns are merged at evaluation time (selected on train/val)
+MODELS = {  # name -> (stage, kind, joint); "+C" = catalytic-CXXC disulfide exception (test-informed, D17)
+    "B4-capC": (1, "full", False), "B4-capC-soft": (1, "full", False),
+    "B4j+C": (1, "full", True), "B5j+C": (2, "full", True),
     "B4": (1, "full", False), "B4-noenv": (1, "noenv", False), "B4-phys": (1, "phys", False), "B4-dF": (1, "dF", False),
     "B4-odd": (1, "odd", False), "B4-odd+S": (1, "odd_sym", False), "B4j": (1, "full", True),
     "B5": (2, "full", False), "B5-noenv": (2, "noenv", False), "B5-phys": (2, "phys", False), "B5-dF": (2, "dF", False),
@@ -293,12 +326,14 @@ MODELS = {  # name -> (stage, kind, joint)
 
 
 def stage_fit(n_boot):
-    tr, _, fp = train_tables()
+    tr, _, fp = train_tables(EVAL_CAP)
     sel = load_sel()
     (OUT / "models").mkdir(parents=True, exist_ok=True)
     caps_all = {}
     for name, (stage, kind, joint) in MODELS.items():
-        o = sel[f"opts_s{stage}"]
+        o = dict(sel[f"opts_s{stage}"], cxxc=name.endswith("+C"))
+        if "capC" in name:
+            o.update(cap="capC", rep="soft" if name.endswith("soft") else "hard")
         caps = clip_caps(tr, stage, o) if o["transform"] == "clip_pct" else None
         caps_all[stage] = caps
         d = derive(tr, stage, o, caps)
@@ -311,7 +346,7 @@ def stage_fit(n_boot):
                    provenance={"train": "megascale train (Dataset 3 + censored)" + (" + fireprot train" if joint else ""),
                                "features": f"data/features/phys_s{stage}_*.parquet + simple_*", "opts": o, "caps": caps,
                                "selection": "results/ladder_physics/selection.csv (Megascale-val natural + train grouped CV)"})
-        m["derive_opts"], m["stage"] = o, stage
+        m["derive_opts"], m["stage"], m["cxxc_exception"] = o, stage, bool(o.get("cxxc"))
         FT.save_model(m, OUT / "models" / f"{name}.json")
         se = m.get("se", {}).get("weights", {})
         print(name, {k: f"{v:.3f}" + (f"±{se[k]:.3f}" if k in se else "") for k, v in m["weights"].items()},
@@ -338,6 +373,7 @@ def predict_models(models, df) -> pd.DataFrame:
 
 
 # ----------------------------------------------------------------------------- competitors
+COMP_CLIP = (-3.0, 8.0)
 COMP = {"FoldX": "results/baselines/foldx_{b}.csv", "tmol-refit": "results/tmol/refit_min_terms_ref_{b}.csv",
         "KORPM": "results/competitors/korpm_{b}.csv", "DDGun3D": "results/competitors/ddgun3d_{b}.csv"}
 
@@ -348,6 +384,8 @@ def attach_competitors(b: pd.DataFrame, bench: str) -> pd.DataFrame:
         if p.exists():
             c = E._norm(pd.read_csv(p, dtype={"pdb_resnum": str}), KEYS)[KEYS + ["ddg_pred"]].drop_duplicates(KEYS)
             b = b.merge(c.rename(columns={"ddg_pred": name}), on=KEYS, how="left")
+    if "FoldX" in b:                       # D17: fixed monotone clip, nothing fitted (audit item 5)
+        b["FoldX-clip"] = b["FoldX"].clip(-3.0, 8.0)
     p = ROOT / "results" / "baselines_ladder" / f"preds_{bench}.parquet"
     if p.exists():
         c = pd.read_parquet(p)[KS + ["B3+"]]
@@ -369,8 +407,9 @@ def strata(b: pd.DataFrame) -> dict:
     dv = b["dvol"].to_numpy(float)
     st["large->small(dV>30)"], st["small->large(dV<-30)"] = dv > 0.3, dv < -0.3
     st["buried small->large"] = st["buried(rsa<0.25)"] & st["small->large(dV<-30)"]
-    pl = b["plddt"].to_numpy(float) if "plddt" in b else b["ctx_bfactor"].to_numpy(float)
-    if np.nanmax(pl) > 1 and ("plddt" in b or bench_is_af(b)):
+    pl = b["plddt"].to_numpy(float) if "plddt" in b else (
+        b["ctx_bfactor"].to_numpy(float) if "ctx_bfactor" in b else np.full(len(b), np.nan))
+    if np.isfinite(pl).any() and np.nanmax(pl) > 1 and ("plddt" in b or bench_is_af(b)):
         for lo, hi in ((0, 50), (50, 70), (70, 90), (90, 101)):
             st[f"pLDDT[{lo},{hi})"] = (pl >= lo) & (pl < hi)
     return st
@@ -390,6 +429,9 @@ def stabilising(df, col, k=5):
 
 
 SUBSETS = dict(L.SUBSETS)
+# D17(2): S461/S669 reported on strict subsets only (S461-all has 24.5% exact Megascale-train duplicate mutations)
+SUBSETS["s461"] = {"strict": SUBSETS["s461"]["strict"]}
+SUBSETS["s669"] = {"strict": SUBSETS["s669"]["strict"]}
 SUBSETS["domainome"] = {"all": "", "plddt70": "plddt>=70", "strict": "homolog_in_megascale_train==0",
                         "plddt<50": "plddt<50", "plddt50-70": "plddt>=50,plddt<70", "plddt70-90": "plddt>=70,plddt<90",
                         "plddt>=90": "plddt>=90"}
@@ -397,17 +439,18 @@ SUBSETS.pop("s2648", None)
 METRICS = L.METRICS
 
 
-def _eval_task(bench, sub, model, df, n_boot, comps):
+def _eval_task(bench, sub, model, df, n_boot, comps, rows_tag="own"):
+    """rows_tag: 'own' = every row this model predicts; 'common' = rows predicted by ALL table models (D17)."""
     target = "ddg" if df.ddg.notna().any() else "score"
     r = E.evaluate(df, model, target=target)
-    row = {"bench": bench, "subset": sub, "model": model, **{k: r[k] for k in METRICS}}
+    row = {"bench": bench, "subset": sub, "rows": rows_tag, "model": model, **{k: r[k] for k in METRICS}}
     if n_boot:
         ci = E.bootstrap_ci(df, model, target=target, n_boot=n_boot)
         for k in METRICS[2:]:
             if k in ci:
                 row[f"{k}_lo"], row[f"{k}_hi"] = ci[k]
     pairs = []
-    for c in comps:
+    for c in (comps if rows_tag == "own" else []):
         both = df[df[c].notna() & df[model].notna()] if c in df else df.iloc[:0]
         if len(both) < 30 or c == model:
             continue
@@ -419,17 +462,17 @@ def _eval_task(bench, sub, model, df, n_boot, comps):
                 pr.update({f"{k}_model": a[k], f"{k}_vs": b[k], f"d_{k}": pb[k]["delta"], f"d_{k}_lo": pb[k]["lo"],
                            f"d_{k}_hi": pb[k]["hi"]})
         pairs.append(pr)
-    site = {"bench": bench, "subset": sub, "model": model, **L.site_decomp(df, model, target)}
+    site = {"bench": bench, "subset": sub, "rows": rows_tag, "model": model, **L.site_decomp(df, model, target)}
     return row, pairs, site
 
 
 def stage_eval(n_boot=1000):
     models = load_models()
     mains = ["B4", "B5"]
-    comps = ["FoldX", "B3+", "tmol-refit", "KORPM", "DDGun3D"]
+    comps = ["FoldX", "FoldX-clip", "B3+", "tmol-refit", "KORPM", "DDGun3D"]
     tasks, cov, strata_rows, stab_rows = [], [], [], []
     for bench, subs in SUBSETS.items():
-        b = add_phys(L.bench_table(bench), bench)
+        b = add_phys(L.bench_table(bench), bench, EVAL_CAP)
         b["cxxc"] = cxxc_flags(b)
         P = predict_models(models, b)
         b = attach_competitors(pd.concat([b, P], axis=1), bench)
@@ -439,14 +482,25 @@ def stage_eval(n_boot=1000):
         b[[c for c in keep if c in b]].to_parquet(OUT / f"preds_{bench}.parquet", index=False)
         cov.append({"bench": bench, "rows": len(b), **{c: float(b[c].notna().mean()) for c in cols}})
         nb = 200 if bench == "domainome" else n_boot
+        # D17(5): models covering < 95% of the benchmark are left out of the common-row intersection and
+        # flagged in the report (e.g. DDGun3D runs on 50 of 518 Domainome domains).
+        low_cov = {c for c in cols if b[c].notna().mean() < 0.95}
+        tab_cols = [c for c in cols if c not in low_cov]
         for sub, expr in subs.items():
             d = E.apply_subset(b, expr)
+            common = d[tab_cols].notna().all(axis=1) if tab_cols else pd.Series(False, index=d.index)
             for c in cols:
+                cc = [x for x in (comps + mains) if x in d and x != c] if c in mains else []
+                use = list(dict.fromkeys(KEYS + ["ddg", "cluster", c] + cc + (["score"] if "score" in d else [])))
+                want_boot = nb if (c in mains + comps or sub in ("all", "natural")) else 0
                 dd = d[d[c].notna()]
                 if len(dd) >= 20:
-                    cc = [x for x in (comps + mains) if x in d and x != c] if c in mains else []
-                    use = list(dict.fromkeys(KEYS + ["ddg", "cluster", c] + cc + (["score"] if "score" in dd else [])))
-                    tasks.append((bench, sub, c, dd[use], nb if (c in mains + comps or sub in ("all", "natural")) else 0, cc))
+                    tasks.append((bench, sub, c, dd[use], want_boot, cc, "own"))
+                dc = d[common & d[c].notna()]
+                if c in tab_cols and len(dc) >= 20 and len(dc) < len(dd):
+                    tasks.append((bench, sub, c, dc[use], want_boot, [], "common"))
+                elif c in tab_cols and len(dc) >= 20:
+                    tasks.append((bench, sub, c, dc[use], 0, [], "common"))
         if bench in ("megascale", "fireprot", "domainome", "abundance_dms"):
             base = E.apply_subset(b, "split==test") if "split" in b and bench in ("megascale", "fireprot") else b
             for sname, mask in strata(base).items():
@@ -480,9 +534,9 @@ def stage_eval(n_boot=1000):
 def paired_af(models):
     p = pd.read_csv(L.PROC / "paired_af.csv", low_memory=False)
     p = p[p.usable.astype(bool) & ~p.af_is_mutant_state.fillna(False).astype(bool)].reset_index(drop=True)
-    af = add_phys(L.with_feats(p[KS].copy(), "paired_af"), "paired_af")
+    af = add_phys(L.with_feats(p[KS].copy(), "paired_af"), "paired_af", EVAL_CAP)
     xt = add_phys(L.with_feats(p.assign(structure=p.xtal_structure, chain=p.xtal_chain, pdb_resnum=p.xtal_resnum)[KS],
-                               "paired_af_xtal"), "paired_af_xtal")
+                               "paired_af_xtal"), "paired_af_xtal", EVAL_CAP)
     for d in (af, xt):
         d["cxxc"] = cxxc_flags(d)
     pa, px = predict_models(models, af), predict_models(models, xt)
@@ -505,7 +559,7 @@ def paired_af(models):
 # ----------------------------------------------------------------------------- stage: antisymmetry (Ssym, diagnostic only)
 def stage_antisym():
     models = load_models()
-    b = add_phys(L.bench_table("ssym"), "ssym")
+    b = add_phys(L.bench_table("ssym"), "ssym", EVAL_CAP)
     b["cxxc"] = cxxc_flags(b)
     b = attach_competitors(pd.concat([b, predict_models(models, b)], axis=1), "ssym")
     b["raw_s1_dF"], b["raw_s2_dF"] = b["s1_dF"], b["s2_dF"]
@@ -563,31 +617,166 @@ def stage_transfer(n_boot):
         print(f"== transfer {name}\n", t.round(3).to_string(index=False))
 
 
+# ----------------------------------------------------------------------------- stage: cap selection (train/val only)
+def stage_caps():
+    """Select E1's D9 repulsion cap (capA c0=1 | capB c0=3 = original | capC c0=1,c1=2 burial-dependent) and the
+    repulsion form (hard cap + signed-log transform vs E1's log-softened `lj_rep_soft`) by Megascale-val +
+    grouped CV on train. Never by test, and never by Ssym alone (Ssym duplicates FireProt-trainval)."""
+    sel = load_sel()
+    rows = []
+    for cap in ("capA", "capB", "capC"):
+        tr, va, _ = train_tables(cap)
+        for form in ("hard", "soft"):
+            o = dict(sel["opts_s1"], cap=cap, rep=form, cxxc=False)
+            if form == "soft" and f"s1_dE_lj_rep_soft_{cap}" not in tr:
+                continue
+            r = _run_config(f"B4[{cap},{form}]", 1, o, "full", sel, tr, va)
+            r["cap"], r["rep_form"] = cap, form
+            # heavy-tail and antisymmetry diagnostics of the repulsion column actually used
+            col = f"s1_dE_lj_rep_soft_{cap}" if form == "soft" else f"s1_dE_lj_rep_{cap}"
+            r["rep_p99"], r["rep_max"] = float(np.nanpercentile(tr[col], 99)), float(np.nanmax(tr[col]))
+            rows.append({k: v for k, v in r.items() if k != "cv_fold_prot"})
+            print({k: (round(v, 4) if isinstance(v, float) else v) for k, v in rows[-1].items()}, flush=True)
+    t = pd.DataFrame(rows)
+    t.to_csv(OUT / "cap_selection.csv", index=False)
+    best = t.loc[(t.val_natural_prot + t.cv_natural_prot).idxmax()]
+    print("BEST", best[["label", "cap", "rep_form", "val_natural_prot", "cv_natural_prot"]].to_dict())
+    sel["cap"], sel["rep_form"] = best["cap"], best["rep_form"]
+    (OUT / "selection_cap.json").write_text(json.dumps({k: sel[k] for k in ("cap", "rep_form")}, indent=1))
+    # Ssym antisymmetry of the raw repulsion column per variant (diagnostic, not a selection criterion)
+    ss = add_phys(L.bench_table("ssym"), "ssym", "")
+    diag = []
+    for cap in ("capA", "capB", "capC"):
+        s2 = add_phys(L.bench_table("ssym"), "ssym", cap)
+        for col in (f"s1_dE_lj_rep_{cap}", f"s1_dE_lj_rep_soft_{cap}", f"s1_dF_{cap}"):
+            if col not in s2:
+                continue
+            w = s2.pivot_table(index="pair_id", columns="direction", values=col, aggfunc="first").dropna()
+            diag.append({"cap": cap, "column": col, "mean_dir_plus_rev": float((w["direct"] + w["reverse"]).mean()),
+                         "r_dir_vs_minus_rev": float(np.corrcoef(w["direct"], -w["reverse"])[0, 1])})
+    pd.DataFrame(diag).to_csv(OUT / "cap_antisymmetry.csv", index=False)
+    print(pd.DataFrame(diag).round(3).to_string(index=False))
+
+
+# ----------------------------------------------------------------------------- stage: G2 stratum check (no test)
+def stage_g2check():
+    """B5 - B4 on the buried small->large stratum using (a) grouped-CV out-of-fold predictions on
+    Megascale-train and (b) Megascale-val. The test-set version of this comparison is a test look (audit item 9)."""
+    tr, va, _ = train_tables()
+    sel = load_sel()
+    rows = []
+    oof = {}
+    for name, stage in (("B4", 1), ("B5", 2)):
+        o = dict(sel[f"opts_s{stage}"], cxxc=False)
+        feats, extra = feature_set("full", o)
+        cfg = make_cfg(feats, sel, extra)
+        d = derive(tr, stage, o)
+        oof[name] = FT.cross_validate(d, cfg, k=5)
+        m = FT.fit(d, cfg)
+        v = derive(va, stage, o)
+        va[f"pred_{name}"] = FT.predict(m, v)
+    for src, frames in (("train_cv_oof", {k: v.assign(pred=v.oof, ddg=v.y) for k, v in oof.items()}),
+                        ("val", {k: va.assign(pred=va[f"pred_{k}"], ddg=va.y) for k in ("B4", "B5")})):
+        for sname in ("all", "buried(rsa<0.25)", "small->large(dV<-30)", "buried small->large"):
+            out = {"source": src, "stratum": sname}
+            for k, f in frames.items():
+                g = f[strata(f)[sname] & f.ddg.notna() & f.pred.notna()]
+                r = E.evaluate(g, "pred")
+                out[f"{k}_n"], out[f"{k}_spearman"], out[f"{k}_prot"] = r["n"], r["spearman"], r["spearman_prot_median"]
+            out["d_spearman"] = out["B5_spearman"] - out["B4_spearman"]
+            out["d_prot"] = out["B5_prot"] - out["B4_prot"]
+            if src == "train_cv_oof":                      # per-fold sign test on the stratum
+                per = []
+                for fold in sorted(oof["B4"].fold.unique()):
+                    gs = {k: f[(f.fold == fold) & strata(f)[sname] & f.ddg.notna()] for k, f in frames.items()}
+                    if min(len(g) for g in gs.values()) >= 30:
+                        per.append(E.evaluate(gs["B5"], "pred")["spearman"] - E.evaluate(gs["B4"], "pred")["spearman"])
+                out["folds_B5_better"] = f"{sum(x > 0 for x in per)}/{len(per)}"
+                out["fold_deltas"] = json.dumps([round(x, 4) for x in per])
+            rows.append(out)
+    t = pd.DataFrame(rows)
+    t.to_csv(OUT / "g2_stratum_check.csv", index=False)
+    print(t.round(4).to_string(index=False))
+
+
 # ----------------------------------------------------------------------------- stage: report
 def stage_report():
+    """D17 reporting protocol: identical rows, strict-only S461/S669, Ssym as a diagnostic table only,
+    FoldX raw and clipped, Megascale on natural / natural-strict / all, CIs on every headline cell."""
     met = pd.read_csv(OUT / "metrics.csv")
+    cov = pd.read_csv(OUT / "prediction_coverage.csv").set_index("bench")
+    com = met[met.rows == "common"] if "rows" in met else met
+    own = met[met.rows == "own"] if "rows" in met else met
     site = pd.read_csv(OUT / "site_decomposition.csv")
-    cols = [("megascale", "natural", "spearman_prot_median", "MS nat ρ_prot"), ("megascale", "natural_strict", "spearman_prot_median", "MS nat-strict"),
-            ("megascale", "all", "spearman", "MS ρ"), ("megascale", "all", "pearson", "MS r"),
-            ("fireprot", "all", "pearson", "FP r"), ("fireprot", "all", "spearman", "FP ρ"), ("s669", "strict", "pearson", "S669 strict r"),
-            ("s461", "all", "pearson", "S461 r"), ("ssym", "direct", "pearson", "Ssym dir r"),
-            ("domainome", "all", "spearman_prot_median", "Dom ρ_dom"), ("abundance_dms", "all", "spearman_prot_median", "Abund ρ")]
-    order = ["B3+", "B4", "B4-noenv", "B4-phys", "B4-dF", "B4-odd", "B4j", "B5", "B5-noenv", "B5-phys", "B5-dF", "B5-odd", "B5j",
-             "FoldX", "tmol-refit", "KORPM", "DDGun3D"]
+    cols = [("megascale", "natural", "spearman_prot_median", "MS nat ρ_prot", True),
+            ("megascale", "natural_strict", "spearman_prot_median", "MS nat-strict ρ_prot", True),
+            ("megascale", "all", "spearman_prot_median", "MS all ρ_prot", True),
+            ("megascale", "all", "pearson", "MS all r", False), ("megascale", "all", "rmse", "MS RMSE", False),
+            ("fireprot", "all", "pearson", "FP r", True), ("fireprot", "all", "spearman", "FP ρ", False),
+            ("s669", "strict", "pearson", "S669-strict r", True), ("s461", "strict", "pearson", "S461-strict r", True),
+            ("domainome", "all", "spearman_prot_median", "Dom ρ_dom", True),
+            ("abundance_dms", "all", "spearman_prot_median", "Abund ρ", False)]
+    order = ["B3+", "B4", "B4-capC", "B4-capC-soft", "B4-noenv", "B4-phys", "B4-dF", "B4-odd", "B4j", "B4j+C",
+             "B5", "B5-noenv", "B5-phys",
+             "B5-dF", "B5-odd", "B5j", "B5j+C", "FoldX", "FoldX-clip", "tmol-refit", "KORPM", "DDGun3D"]
     rows = []
     for mod in order:
         r = {"model": mod}
-        for b, s, k, lab in cols:
-            x = met[(met.bench == b) & (met.subset == s) & (met.model == mod)]
-            r[lab] = f"{x[k].iloc[0]:.3f}" if len(x) and np.isfinite(x[k].iloc[0]) else "–"
-        x = site[(site.bench == "megascale") & (site.subset == "natural") & (site.model == mod)]
+        for b, sub, k, lab, with_ci in cols:
+            x = com[(com.bench == b) & (com.subset == sub) & (com.model == mod)]
+            c = cov.at[b, mod] if (b in cov.index and mod in cov.columns) else np.nan
+            if not len(x) or not np.isfinite(x[k].iloc[0]):
+                r[lab] = "–" if not (np.isfinite(c) and c < 0.95) else "(subset)"
+                continue
+            v = f"{x[k].iloc[0]:.3f}"
+            if with_ci and f"{k}_lo" in x and np.isfinite(x[f"{k}_lo"].iloc[0]):
+                v += f" [{x[f'{k}_lo'].iloc[0]:.2f},{x[f'{k}_hi'].iloc[0]:.2f}]"
+            r[lab] = v
+        x = site[(site.bench == "megascale") & (site.subset == "natural") & (site.model == mod)
+                 & (site.get("rows", "own") == "common")]
         r["MS nat site/within"] = f"{x.site_spearman.iloc[0]:.2f}/{x.within_site_mean_spearman.iloc[0]:.2f}" if len(x) else "–"
         rows.append(r)
     t = pd.DataFrame(rows)
-    md = "| " + " | ".join(t.columns) + " |\n|" + "---|" * len(t.columns) + "\n" + "\n".join(
-        "| " + " | ".join(map(str, v)) + " |" for v in t.to_numpy())
-    (OUT / "main_table.md").write_text(md + "\n")
-    print(md)
+    md = ["## Main table (D17: identical rows; strict-only S461/S669; Ssym excluded — diagnostic table below)", ""]
+    md.append("| " + " | ".join(t.columns) + " |")
+    md.append("|" + "---|" * len(t.columns))
+    md += ["| " + " | ".join(map(str, v)) + " |" for v in t.to_numpy()]
+    # n per cell
+    ns = {lab: int(com[(com.bench == b) & (com.subset == sub) & (com.model == "B4")].n.iloc[0])
+          for b, sub, k, lab, _ in cols if len(com[(com.bench == b) & (com.subset == sub) & (com.model == "B4")])}
+    md += ["", "Rows per column (identical across models): " + ", ".join(f"{k} {v:,}" for k, v in ns.items()), ""]
+    # FireProt on ALL rows: the identical-row intersection excludes the two 2TRX disulfide rows (tmol and FoldX
+    # fail on them), which is exactly where the test-informed CXXC exception acts. Shown explicitly (audit item 1).
+    fp = own[(own.bench == "fireprot") & (own.subset == "all")]
+    md += ["## FireProt-test on all 347 rows (not identical rows: FoldX covers 341, tmol-refit 344)", "",
+           "The 2 rows that differ between the `j` and `j+C` models (2TRX C32A/C35A, catalytic CGPC disulfide,",
+           "measured ddg ≈ −4) are missing from the identical-row set, so the column above cannot show the effect",
+           "of the test-informed CXXC exception. Here it is:", "",
+           "| model | n | Pearson | Spearman | ρ_prot (9 proteins ≥10 variants) | RMSE |", "|---|---|---|---|---|---|"]
+    for mod in ["B4", "B5", "B4j", "B4j+C", "B5j", "B5j+C", "B3+", "FoldX", "FoldX-clip", "tmol-refit", "KORPM", "DDGun3D"]:
+        x = fp[fp.model == mod]
+        if len(x):
+            x = x.iloc[0]
+            md.append(f"| {mod} | {int(x.n)} | {x.pearson:.3f} | {x.spearman:.3f} | {x.spearman_prot_median:.3f} | {x.rmse:.2f} |")
+    md += ["", "B4j 0.389 vs B4j+C 0.479 and B5j 0.396 vs B5j+C 0.484: the whole joint-model advantage on FireProt-test",
+           "Pearson came from those two rows. The headline joint models (no `+C`) are the honest ones.", ""]
+    # Ssym diagnostic
+    anti = pd.read_csv(OUT / "antisymmetry.csv") if (OUT / "antisymmetry.csv").exists() else None
+    if anti is not None:
+        md += ["## Ssym — antisymmetry diagnostic only (85.7% of direct rows duplicate FireProt-trainval;",
+               "never a test for any model fitted on FireProt: B4j/B5j/tmol-refit/KORPM/DDGun3D)", ""]
+        a = anti[anti.model.isin(["raw_s1_dF", "raw_s2_dF", "B4", "B5", "B4-odd", "B5-odd", "B3+", "KORPM", "DDGun3D"])]
+        md.append("| model | r(dir,−rev) | bias | Pearson direct | Pearson reverse | Pearson direct, 2-structure sym |")
+        md.append("|---|---|---|---|---|---|")
+        for _, x in a.iterrows():
+            md.append(f"| {x.model} | {x.r_pearson:.2f} | {x.bias:+.2f} | {x.pearson_direct:.3f} | "
+                      f"{x.pearson_reverse:.3f} | {x.pearson_direct_symmetrised:.3f} |")
+        md += ["", "The last column is ½[pred(direct on the WT structure) − pred(reverse on the mutant structure)]:",
+               "it needs BOTH experimental structures and is antisymmetric by construction, so it is not available",
+               "at inference on a single structure. The other columns are single-structure scores.", ""]
+        md.append("")
+    (OUT / "main_table.md").write_text("\n".join(md) + "\n")
+    print("\n".join(md))
     models = load_models()
     w = []
     for name in ("B4", "B5", "B4-phys", "B5-phys", "B4j", "B5j"):
@@ -602,7 +791,7 @@ def stage_report():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--stage", default="all", choices=["select", "ablate", "fit", "eval", "antisym", "transfer", "report", "all"])
+    ap.add_argument("--stage", default="all", choices=["select", "ablate", "fit", "eval", "antisym", "transfer", "g2check", "caps", "report", "all"])
     ap.add_argument("--n-boot", type=int, default=200)
     a = ap.parse_args()
     warnings.filterwarnings("ignore")
@@ -620,6 +809,10 @@ def main():
         stage_antisym()
     if st in ("transfer", "all"):
         stage_transfer(a.n_boot)
+    if st in ("g2check", "all"):
+        stage_g2check()
+    if st in ("caps",):
+        stage_caps()
     if st in ("report", "all"):
         stage_report()
 

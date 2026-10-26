@@ -1,7 +1,7 @@
 {
  "name": "B4j",
- "created": "2026-10-26T16:01:35",
- "git_commit": "c6ddfb4",
+ "created": "2026-10-26T17:21:31",
+ "git_commit": "9743124",
  "config": {
   "features": [
    "e_lj_atr",
@@ -21,7 +21,7 @@
    "pro_nhhb",
    "gly_posphi",
    "occ_dvol_loss",
-   "ss_broken_nc",
+   "ss_broken",
    "dref_apolar",
    "dref_polar"
   ],
@@ -60,7 +60,7 @@
    "bur": 1,
    "pro_nhhb": 1,
    "occ_dvol_loss": 1,
-   "ss_broken_nc": 1
+   "ss_broken": 1
   },
   "l2": 1e-06,
   "intercept": true,
@@ -87,7 +87,7 @@
   "pro_nhhb": 0.0,
   "gly_posphi": -0.6893881812939878,
   "occ_dvol_loss": 1.1606498251145667,
-  "ss_broken_nc": 3.2501052926843292,
+  "ss_broken": 3.2501052926843292,
   "dref_apolar": 0.0029247637211968283,
   "dref_polar": -0.0007866979701601106
  },
@@ -177,7 +177,8 @@
    "transform": "slog_rep",
    "pro": "none",
    "avg": "avg",
-   "drefp": true
+   "drefp": true,
+   "cxxc": false
   },
   "caps": null,
   "selection": "results/ladder_physics/selection.csv (Megascale-val natural + train grouped CV)"
@@ -202,7 +203,7 @@
    "pro_nhhb": 0.09711297132311925,
    "gly_posphi": 0.09315758684125992,
    "occ_dvol_loss": 0.13316751464345536,
-   "ss_broken_nc": 1.0317266716319047,
+   "ss_broken": 1.0317266716319047,
    "dref_apolar": 0.014067712539979337,
    "dref_polar": 0.0018546889774251666
   },
@@ -3666,7 +3667,7 @@
    1.0684363816502198,
    1.0468291211710936
   ],
-  "ss_broken_nc": [
+  "ss_broken": [
    0.6825444903026932,
    2.7492859730382673,
    1.4736125542197087,
@@ -4278,7 +4279,9 @@
   "transform": "slog_rep",
   "pro": "none",
   "avg": "avg",
-  "drefp": true
+  "drefp": true,
+  "cxxc": false
  },
- "stage": 1
+ "stage": 1,
+ "cxxc_exception": false
 }

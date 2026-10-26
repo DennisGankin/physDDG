@@ -1,7 +1,7 @@
 {
  "name": "B5-odd",
- "created": "2026-10-26T16:05:52",
- "git_commit": "c6ddfb4",
+ "created": "2026-10-26T17:26:59",
+ "git_commit": "9743124",
  "config": {
   "features": [
    "e_lj_atr",
@@ -122,7 +122,8 @@
    "transform": "slog_rep",
    "pro": "none",
    "avg": "avg",
-   "drefp": false
+   "drefp": false,
+   "cxxc": false
   },
   "caps": null,
   "selection": "results/ladder_physics/selection.csv (Megascale-val natural + train grouped CV)"
@@ -132,7 +133,9 @@
   "transform": "slog_rep",
   "pro": "none",
   "avg": "avg",
-  "drefp": false
+  "drefp": false,
+  "cxxc": false
  },
- "stage": 2
+ "stage": 2,
+ "cxxc_exception": false
 }

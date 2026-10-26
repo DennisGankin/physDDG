@@ -1,17 +1,244 @@
-# Physics rungs B4 / B5: fitting, ablations, gates G1 / G2 / G6, antisymmetry (2026-10-26, fitting lead)
+# Physics rungs B4 / B5: fitting, ablations, gates, antisymmetry — D17 re-issue (2026-10-26, fitting lead)
 
-Code `scripts/52_ladder_physics.py` (`--stage select|ablate|fit|eval|antisym|transfer|report`), fitter `physddg/fit.py`
-(+ `sym_pair` option added for D15). Inputs: E1's `data/features/phys_s{1,2}_<ds>.parquet` and my
-`data/features/simple_<ds>.parquet`. Outputs in `results/ladder_physics/` (models/*.json with cluster-bootstrap SEs,
-selection.csv, ablation.csv, metrics.csv, paired.csv, strata.csv, stabilising.csv, antisymmetry{,_terms}.csv,
-paired_af_agreement.csv, transfer_B{4,5}.csv, weights.csv, main_table.md). Predictions `preds_*.parquet` git-ignored.
+**This version supersedes the first issue** (kept verbatim in the appendix at the bottom). It applies the reporting
+protocol D17 agreed after the independent audit (`notes/audit_1.md`):
+1. No test-informed rule in a headline model. The catalytic-CXXC disulfide exception was built from two
+   FireProt-**test** rows (2TRX C32A/C35A), so the headline joint models (`B4j`, `B5j`) no longer use it; the
+   variants that do are labelled `+C` and are reported as test-informed.
+2. S461 and S669 are reported on **strict subsets only** (no Megascale-train or FireProt-trainval overlap);
+   S461-all has 24.5% rows that are exact Megascale-train mutations.
+3. Ssym is an **antisymmetry diagnostic only**, never a performance claim, and never for any model that touched
+   FireProt-trainval (85.7% of its direct rows duplicate it).
+4. FoldX is reported raw **and** clipped to [−3, 8] (a fixed monotone transform, nothing fitted).
+5. Every main-table cell is on **identical rows** across models; cells covering a subset are marked `(subset)`.
+6. The Megascale headline is given on natural, natural-strict and all.
+7. Gate verdicts come from paired-bootstrap CIs (D16).
+
+Code `scripts/52_ladder_physics.py` (`--stage select|ablate|fit|eval|antisym|transfer|g2check|caps|report`),
+fitter `physddg/fit.py`. Outputs in `results/ladder_physics/`.
 
 **Protocol.** Fitted on Megascale-train only (Dataset 3 + 12.4k censored rows as intervals), Huber + interval loss,
-20 shrunk reference energies (D7). Everything selected on Megascale-val (natural, per-protein median ρ) plus grouped
-5-fold CV on train; no test number entered any choice. B4 = stage-1 terms + pruned B3+ features (burial, Occ×ΔV−,
-X→P×NH-H-bonded, G→X at φ>0, disulfide-broken with a CXXC exception; cis-Pro and ΔV+ dropped per G6). B5 = same with
-stage-2 (flexible-neighbour) energies. `j` = joint fit with FireProt-train (FireProt scale 1.75, offset −0.61,
-Megascale δ_ref nuisance dropped at inference).
+20 shrunk reference energies (D7). Selection on Megascale-val (natural, per-protein median ρ) plus grouped 5-fold CV
+on train. B4 = stage-1 engine terms + the G6-pruned B3+ features; B5 = the same with stage-2 (flexible-neighbour)
+energies; `j` = joint fit with FireProt-train (scale 1.75, offset −0.61, Megascale δ_ref nuisance dropped at inference).
+
+**What the headline rests on.** The Megascale "natural" column is **21 proteins** (22,159 variants) and is *not*
+homology-clean: 1TUC and 2KXD share 1,437 identical mutations (5.1% of test rows) with a 100%-identical Megascale-train
+domain. The natural-strict column (14 proteins, 15,733 variants) removes them and the numbers do not drop
+(B4 0.677 → 0.687), so there is no measurable inflation — but the headline subset is not clean and should not be
+described as such. FireProt per-protein ρ is a median over only **9** proteins with ≥ 10 variants.
+
+## Main table (D17: identical rows; strict-only S461/S669; Ssym excluded — diagnostic table below)
+
+| model | MS nat ρ_prot | MS nat-strict ρ_prot | MS all ρ_prot | MS all r | MS RMSE | FP r | FP ρ | S669-strict r | S461-strict r | Dom ρ_dom | Abund ρ | MS nat site/within |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| B3+ | 0.648 | 0.649 | 0.649 | 0.631 | 0.824 | 0.456 [0.20,0.62] | 0.476 | 0.330 | 0.569 | 0.389 [0.36,0.42] | 0.446 | 0.71/0.42 |
+| B4 | 0.677 | 0.687 | 0.683 | 0.681 | 0.781 | 0.459 [0.21,0.63] | 0.477 | 0.328 | 0.575 | 0.406 [0.37,0.45] | 0.468 | 0.73/0.47 |
+| B4-capC | 0.678 | 0.688 | 0.683 | 0.682 | 0.780 | 0.457 [0.21,0.63] | 0.476 | 0.328 | 0.574 | 0.407 [0.37,0.45] | 0.469 | 0.73/0.47 |
+| B4-capC-soft | 0.681 | 0.685 | 0.682 | 0.677 | 0.785 | 0.475 [0.23,0.64] | 0.497 | 0.334 | 0.588 | 0.400 [0.37,0.44] | 0.464 | 0.73/0.47 |
+| B4-noenv | 0.662 | 0.672 | 0.671 | 0.669 | 0.793 | 0.445 [0.21,0.62] | 0.460 | 0.318 | 0.556 | 0.381 [0.35,0.42] | 0.468 | 0.72/0.45 |
+| B4-phys | 0.587 | 0.596 | 0.589 | 0.605 | 0.848 | 0.384 [0.15,0.56] | 0.431 | 0.260 | 0.429 | 0.290 [0.24,0.33] | 0.381 | 0.65/0.36 |
+| B4-dF | 0.599 | 0.604 | 0.592 | 0.566 | 0.874 | 0.312 [0.13,0.46] | 0.347 | 0.184 | 0.264 | 0.282 [0.24,0.32] | 0.409 | 0.65/0.31 |
+| B4-odd | 0.633 | 0.653 | 0.617 | 0.614 | 0.856 | 0.438 [0.20,0.61] | 0.485 | 0.270 | 0.428 | 0.392 [0.34,0.44] | 0.420 | 0.68/0.43 |
+| B4j | 0.672 | 0.688 | 0.662 | 0.669 | 0.797 | 0.480 [0.22,0.65] | 0.492 | 0.350 | 0.585 | 0.444 [0.40,0.49] | 0.479 | 0.74/0.43 |
+| B4j+C | 0.672 | 0.688 | 0.662 | 0.669 | 0.797 | 0.480 [0.22,0.65] | 0.492 | 0.350 | 0.585 | 0.440 [0.39,0.49] | 0.479 | 0.74/0.43 |
+| B5 | 0.687 | 0.697 | 0.685 | 0.686 | 0.776 | 0.467 [0.23,0.64] | 0.490 | 0.315 | 0.556 | 0.412 [0.37,0.45] | 0.469 | 0.74/0.48 |
+| B5-noenv | 0.678 | 0.686 | 0.682 | 0.676 | 0.787 | 0.454 [0.23,0.62] | 0.478 | 0.304 | 0.539 | 0.390 [0.35,0.43] | 0.474 | 0.73/0.45 |
+| B5-phys | 0.607 | 0.614 | 0.614 | 0.619 | 0.836 | 0.394 [0.18,0.57] | 0.445 | 0.244 | 0.413 | 0.293 [0.24,0.33] | 0.396 | 0.66/0.37 |
+| B5-dF | 0.595 | 0.601 | 0.601 | 0.580 | 0.864 | 0.347 [0.17,0.51] | 0.373 | 0.197 | 0.285 | 0.276 [0.23,0.31] | 0.410 | 0.66/0.32 |
+| B5-odd | 0.645 | 0.667 | 0.645 | 0.626 | 0.846 | 0.443 [0.22,0.60] | 0.496 | 0.261 | 0.418 | 0.397 [0.34,0.44] | 0.424 | 0.70/0.44 |
+| B5j | 0.681 | 0.695 | 0.673 | 0.674 | 0.793 | 0.486 [0.24,0.65] | 0.502 | 0.342 | 0.575 | 0.444 [0.40,0.49] | 0.481 | 0.75/0.43 |
+| B5j+C | 0.681 | 0.695 | 0.673 | 0.674 | 0.793 | 0.486 [0.24,0.65] | 0.502 | 0.342 | 0.575 | 0.442 [0.40,0.49] | 0.481 | 0.75/0.43 |
+| FoldX | 0.629 | 0.640 | 0.633 | 0.447 | 3.168 | 0.417 [0.24,0.57] | 0.454 | – | – | 0.430 | – | 0.68/0.33 |
+| FoldX-clip | 0.629 | 0.640 | 0.633 | 0.590 | 1.843 | 0.423 [0.25,0.58] | 0.454 | – | – | 0.430 | – | 0.68/0.34 |
+| tmol-refit | 0.622 | 0.637 | 0.626 | 0.629 | 0.822 | 0.486 [0.23,0.65] | 0.493 | – | – | – | – | 0.67/0.43 |
+| KORPM | 0.500 | 0.513 | 0.533 | 0.524 | 0.971 | 0.411 [0.24,0.57] | 0.428 | 0.194 | 0.543 | 0.302 [0.25,0.35] | – | 0.53/0.37 |
+| DDGun3D | 0.516 | 0.475 | 0.502 | 0.537 | 1.166 | 0.529 [0.24,0.68] | 0.462 | 0.347 | 0.552 | (subset) | – | 0.57/0.32 |
+
+Rows per column (identical across models): MS nat ρ_prot 22,159, MS nat-strict ρ_prot 15,733, MS all ρ_prot 28,172, MS all r 28,172, MS RMSE 28,172, FP r 338, FP ρ 338, S669-strict r 470, S461-strict r 285, Dom ρ_dom 509,388, Abund ρ 37,947
+
+## FireProt-test on all 347 rows (not identical rows: FoldX covers 341, tmol-refit 344)
+
+The 2 rows that differ between the `j` and `j+C` models (2TRX C32A/C35A, catalytic CGPC disulfide,
+measured ddg ≈ −4) are missing from the identical-row set, so the column above cannot show the effect
+of the test-informed CXXC exception. Here it is:
+
+| model | n | Pearson | Spearman | ρ_prot (9 proteins ≥10 variants) | RMSE |
+|---|---|---|---|---|---|
+| B4 | 347 | 0.450 | 0.472 | 0.578 | 2.06 |
+| B5 | 347 | 0.456 | 0.479 | 0.584 | 2.05 |
+| B4j | 347 | 0.389 | 0.472 | 0.448 | 2.10 |
+| B4j+C | 347 | 0.479 | 0.494 | 0.576 | 2.04 |
+| B5j | 347 | 0.396 | 0.477 | 0.506 | 2.10 |
+| B5j+C | 347 | 0.484 | 0.502 | 0.572 | 2.04 |
+| B3+ | 347 | 0.432 | 0.455 | 0.404 | 2.08 |
+| FoldX | 341 | 0.411 | 0.449 | 0.634 | 2.32 |
+| FoldX-clip | 341 | 0.417 | 0.449 | 0.634 | 2.29 |
+| tmol-refit | 344 | 0.477 | 0.495 | 0.678 | 2.07 |
+| KORPM | 347 | 0.397 | 0.408 | 0.385 | 2.11 |
+| DDGun3D | 347 | 0.488 | 0.431 | 0.478 | 2.00 |
+
+B4j 0.389 vs B4j+C 0.479 and B5j 0.396 vs B5j+C 0.484: the whole joint-model advantage on FireProt-test
+Pearson came from those two rows. The headline joint models (no `+C`) are the honest ones.
+
+## Ssym — antisymmetry diagnostic only (85.7% of direct rows duplicate FireProt-trainval;
+never a test for any model fitted on FireProt: B4j/B5j/tmol-refit/KORPM/DDGun3D)
+
+| model | r(dir,−rev) | bias | Pearson direct | Pearson reverse | Pearson direct, 2-structure sym |
+|---|---|---|---|---|---|
+| raw_s1_dF | 0.13 | +7.95 | 0.260 | -0.037 | 0.163 |
+| raw_s2_dF | 0.04 | +6.25 | 0.386 | 0.073 | 0.364 |
+| B4-odd | 0.59 | +0.44 | 0.618 | 0.410 | 0.574 |
+| B4 | 0.23 | +1.39 | 0.697 | 0.213 | 0.598 |
+| B5-odd | 0.57 | +0.38 | 0.618 | 0.451 | 0.604 |
+| B5 | 0.25 | +1.37 | 0.699 | 0.240 | 0.613 |
+| B3+ | -0.22 | +1.82 | 0.586 | -0.001 | 0.480 |
+| KORPM | 0.87 | +0.15 | 0.566 | 0.494 | 0.549 |
+| DDGun3D | 0.99 | +0.04 | 0.556 | 0.534 | 0.546 |
+
+The last column is ½[pred(direct on the WT structure) − pred(reverse on the mutant structure)]:
+it needs BOTH experimental structures and is antisymmetric by construction, so it is not available
+at inference on a single structure. The other columns are single-structure scores.
+
+
+
+## Gate verdicts under D16/D17 (paired-bootstrap CIs, identical rows)
+
+**G1 — fails on rank against FoldX, passes on calibration.**
+| comparison (Megascale-test) | natural ρ_prot | natural-strict ρ_prot | all ρ_prot | natural Pearson |
+|---|---|---|---|---|
+| B4 − FoldX | +0.048 [−0.008, +0.105] | +0.048 [+0.002, +0.119] | +0.050 [+0.002, +0.110] | +0.252 [+0.193, +0.297] |
+| B4 − FoldX-clip | +0.048 [−0.008, +0.105] | +0.048 [+0.001, +0.119] | +0.050 [+0.001, +0.110] | **+0.100 [+0.062, +0.132]** |
+| B5 − FoldX | +0.058 [−0.003, +0.113] | +0.058 [+0.011, +0.118] | +0.052 [+0.010, +0.118] | +0.256 [+0.200, +0.299] |
+| B5 − FoldX-clip | +0.058 [−0.003, +0.113] | +0.058 [+0.011, +0.118] | +0.052 [+0.010, +0.118] | +0.104 [+0.068, +0.134] |
+| B4 − B3+ | +0.029 [−0.002, +0.051] | +0.038 [+0.016, +0.052] | +0.034 [+0.005, +0.049] | +0.051 [+0.037, +0.062] |
+| B5 − B3+ | +0.038 [+0.005, +0.062] | +0.049 [+0.016, +0.066] | +0.036 [+0.008, +0.060] | +0.055 [+0.039, +0.069] |
+| B4 − tmol-refit | +0.055 [+0.016, +0.085] | +0.050 [−0.001, +0.107] | +0.057 [+0.003, +0.076] | +0.067 [+0.054, +0.080] |
+
+- D16 requires B4 ≥ B3+ + 0.03 **and** a paired CI over FoldX excluding 0 on the primary subset (natural).
+  **B4 fails both** (+0.029, and the FoldX CI includes 0). **B5 clears the B3+ bar** (+0.038, CI excludes 0) but its
+  FoldX CI also includes 0 on natural. On natural-strict and on all 28 proteins the FoldX CI does exclude 0.
+  The honest statement: *ahead of FoldX in point estimate on every Megascale subset, significantly so on two of the
+  three, but not on the pre-registered one.*
+- **The calibration claim survives clipping but shrinks.** On the natural subset raw FoldX has Pearson 0.445 and
+  RMSE 3.22 kcal/mol against B4's 0.696 / 0.78, but most of that gap is FoldX's uncapped tail (predictions up to
+  71 kcal/mol). Clipping FoldX to [−3, 8], with nothing fitted, lifts it to Pearson 0.596 and RMSE 1.85. The
+  remaining advantage, +0.100 [+0.062, +0.132] Pearson and ~1.07 kcal/mol RMSE, is real and significant — but it is
+  +0.10, not the +0.25 the first issue quoted.
+- Against the other classical methods the margin is larger and significant: B4 − tmol-refit +0.055 [+0.016, +0.085],
+  B4 − KORPM +0.177, B4 − DDGun3D +0.160 (natural ρ_prot).
+- **Not decoration either way.** Removing the environment statistical potential costs 0.015 (B4 0.677 → 0.662);
+  removing all engine energy terms costs 0.041 (CV); keeping only the energies (no burial/env/Rama/indicators) costs
+  0.090. Both halves carry signal and they overlap heavily.
+- **On FireProt-test nothing is significant**: B4 − FoldX Pearson +0.038 [−0.076, +0.105], B4 − tmol-refit
+  −0.017 [−0.075, +0.036], B4 − DDGun3D −0.038. CIs there are ±0.2 wide.
+
+**G2 — fails overall, passes on buried small→large, and that now rests on held-out folds, not on test.**
+The first issue justified the stratum claim with test data (audit item 9). Re-done with grouped-CV out-of-fold
+predictions on Megascale-train and on Megascale-val (`g2_stratum_check.csv`):
+| stratum | train CV OOF ΔρB5−B4 (pooled / per-prot) | folds B5 better | Megascale-val (pooled / per-prot) |
+|---|---|---|---|
+| all | +0.004 / +0.003 | 5/5 | +0.005 / +0.005 |
+| buried (RSA < 0.25) | +0.008 / +0.016 | 5/5 | +0.013 / −0.005 |
+| small→large (ΔV < −30 Å³) | +0.017 / +0.026 | 5/5 | +0.017 / +0.007 |
+| **buried small→large** | **+0.034 / +0.058** | **5/5** | **+0.068 / +0.078** |
+- Overall gain is +0.004 (CV) / +0.005 (val) / +0.010 (test, n.s.), far below the 0.02 bar → **G2 fails overall**.
+- On buried small→large the gain is ≥ 0.03 and present in 5/5 folds, i.e. it meets both the magnitude and the
+  ≥70%-of-folds criterion on data never used for fitting. The stratum is 8–9% of rows.
+- **Recommendation unchanged**: ship stage 1 as the default; keep stage 2 for buried small→large and for AF uniform
+  repacking (G5). Runtime is within target either way.
+
+**G6 — passes.** No sign flips in B4 or B5 between the Megascale-only and FireProt-only fits; scaled ratios (÷1.7 for
+the assay scale) are 0.6–1.8 for every energy term, the env potential, Rama, burial and the cavity term. `dTS` is
+undetermined on FireProt (0) and the disulfide indicator is undetermined on Megascale (no such rows). Reference
+energies correlate r = 0.70 (B4) / 0.75 (B5). The Megascale δ_ref nuisance exceeds 0.4 kcal/mol only for Cys (−0.55).
+Full tables in `transfer_B4.csv` / `transfer_B5.csv`.
+
+## Repulsion cap selection (D9) — chosen on train/val only, and it does not matter
+E1 supplied three stage-1 cap settings (capA c0=1, capB c0=3 = the original, capC c0=1 c1=2 rising with burial), each
+with an extra log-softened repulsion column. Selected by Megascale-val natural ρ_prot + grouped-CV natural ρ_prot:
+| variant | val natural ρ_prot | CV natural ρ_prot | p99 of the repulsion column |
+|---|---|---|---|
+| capA hard / soft | 0.7276 / 0.7190 | 0.6691 / 0.6672 | 65.9 / 53.3 |
+| capB hard / soft | 0.7265 / 0.7195 | 0.6709 / 0.6678 | 132.9 / 52.8 |
+| **capC hard** (selected) | **0.7291** | **0.6715** | 122.4 |
+| capC soft | 0.7201 | 0.6680 | 52.8 |
+The spread across all six is 0.010 on val and 0.004 on CV, i.e. **within the CV standard error (0.0064)**. Refitting
+the headline with the winner changes nothing measurable on test either (B4 0.677 → B4-capC 0.678 natural ρ_prot).
+The log-softened column halves the raw heavy tail (p99 123 → 53 kcal/mol) and removes the need for my signed-log
+transform, at a cost of ~0.007 val ρ; it is the better-behaved feature but not the more accurate one.
+**Conclusion: the cap setting is not where the remaining error is.** I would keep capC (physically motivated, D9)
+and state that the choice is immaterial. Stage-2 cap variants arrived after this selection; given that all six
+stage-1 settings are within noise I did not rerun the stage-2 selection, and `B5` uses the original stage-2 features.
+
+## Antisymmetry (D15) — unchanged conclusion, now with the two-structure column labelled
+Single-structure scores (what is available at inference) and, separately, the two-structure symmetrisation:
+| predictor | r(dir, −rev) | bias (kcal/mol) | Pearson direct | Pearson reverse | Pearson direct, 2-structure sym |
+|---|---|---|---|---|---|
+| raw stage-1 ΔF | 0.13 | +7.95 | 0.260 | −0.037 | 0.163 |
+| raw stage-2 ΔF | 0.04 | +6.25 | 0.386 | 0.073 | 0.364 |
+| B4 | 0.23 | +1.39 | 0.697 | 0.213 | 0.598 |
+| B5 | 0.25 | +1.37 | 0.699 | 0.240 | 0.613 |
+| B4-odd (no WT-site-only terms) | 0.59 | +0.44 | 0.618 | 0.410 | 0.574 |
+| B5-odd | 0.57 | +0.38 | 0.618 | 0.451 | 0.604 |
+| B3+ | −0.22 | +1.82 | 0.586 | −0.001 | 0.480 |
+| KORPM / DDGun3D | 0.87 / 0.99 | +0.15 / +0.04 | 0.566 / 0.556 | 0.494 / 0.534 | 0.549 / 0.546 |
+
+The last column is ½[pred(direct on the WT structure) − pred(reverse on the mutant structure)]. It needs **both**
+experimental structures, so it is a two-structure diagnostic and not an inference-time score; it is antisymmetric by
+construction and it *lowers* direct accuracy for B4 (0.697 → 0.598). E1's single-structure symmetrisation
+(`sym_s2_dF`, scoring the reverse on the modelled mutant environment) does not fix the defect either (r 0.15,
+bias +3.5 unfitted), so option (b) from the first issue is closed.
+
+**Where the defect lives** (`antisymmetry_terms.csv`): every engine term is already nearly antisymmetric across the
+two structures (r(dir, −rev) 0.97 lj_atr, 0.98 solv_apolar, 0.93 solv_polar, 0.90 elec, mean sums ±0.1–0.3 kcal/mol)
+**except lj_rep** (mean dir+rev +7.5 stage 1 / +5.9 stage 2, r 0.29). The softened repulsion halves that bias
+(+3.2) without improving r (0.35), and the capped variants only move it from +7.5 to +4.2 (capA). So the fixed
+backbone, not the cap, is the cause: each crystal structure is relaxed around its resident residue. Honest summary:
+**our headline models are not antisymmetric, and no cap or transform available to us fixes it.** Dropping the
+WT-site-only main effects (B4-odd) buys r = 0.59 at a cost of 0.044 natural ρ_prot — a real trade, available on a
+single structure, and the variant I would report whenever antisymmetry matters.
+
+## Where we are not better (carried over from the audit, re-checked on identical rows)
+| set / metric | ours | better |
+|---|---|---|
+| Domainome ρ_dom | B4 0.406, B5 0.412 | FoldX 0.430 (B4 − FoldX −0.024 [−0.048, +0.013], n.s.) |
+| FireProt-test Pearson (347 rows) | B4 0.450, B5 0.456 | DDGun3D 0.488, tmol-refit 0.477 (all n.s.) |
+| FireProt-test ρ_prot (9 proteins) | B4 0.578 | tmol-refit 0.678, FoldX 0.634 |
+| S669-strict Pearson | B4 0.328 (B3+ 0.330 — no engine gain at all) | DDGun3D 0.347 |
+| Megascale buried small→large | B5 0.495 | FoldX 0.548 |
+| Stabilising precision@5 | B4 0.133, B5 0.152 | FoldX 0.219, tmol-refit 0.181 |
+| Ssym antisymmetry | B4 r 0.23 | KORPM 0.87, DDGun3D 0.99 |
+
+## Disclosure: PDB-statistics overlap
+The PISCES set behind the rotamer library, Ramachandran maps and environment potential contains homologues of 10/28
+Megascale-test domains, 24/27 FireProt-test proteins, 70/94 S669, 33/48 S461 and 262/517 Domainome constructs. The
+audit re-derived the tables without the 300 overlapping chains: the env potential moves by 0.017 kT on average,
+Rama by 0.010 kT, and B4/B5 predictions by 0.0014 kcal/mol, changing per-protein ρ by ≤ 0.0005. Disclosed, not
+corrected.
+
+## Term weights, ablations, strata, heavy tails
+Unchanged from the first issue except that the headline disulfide feature is now the plain indicator; the numbers in
+the appendix sections "Term weights", "Heavy tails", "Drop-one ablations" and "Strata" still stand (the weights are
+identical to 3 decimals, because Megascale-train contains no disulfide-breaking rows and the feature is inactive
+there). The one correction: in `B4j`/`B5j` the disulfide weight (3.25 / 3.32 kcal/mol, fitted on 8 FireProt-train
+rows) now also applies to the two catalytic-CXXC test rows, which is why their FireProt Pearson falls to 0.389/0.396.
+
+## Requests to E1
+- **R-fit1** (posted in `notes/engine_mutate.md`): the WT→WT test in `tests/test_mutate.py:43-45` is tautological —
+  ΔF is defined as F − F[wt], so the WT entry is 0 by construction and the test cannot fail. Suggested replacements
+  that would actually test D6 are in that note.
+- Stage-2 cap variants and reverse/frozen columns have landed; given that all stage-1 cap settings are within CV
+  noise I have not rerun the stage-2 selection. If the backbone-ensemble and single-structure symmetrisation are
+  both dropped (as E1's pre-tests indicate), the remaining lever on the repulsion term is backbone give, not the cap.
+
+---
+
+# APPENDIX — superseded first issue (2026-10-26, before the audit)
+
+Everything below is the original write-up, kept for traceability. Its headline table used S461/S669-all,
+ranked joint models on Ssym, reported FoldX only raw, evaluated each model on its own rows, and contained the
+test-informed CXXC exception in the headline joint models. **Do not quote these tables.**
 
 ## Main table (identical rows per column; MS = Megascale-test, ρ_prot = per-protein median Spearman)
 | model | MS nat ρ_prot | MS nat-strict | MS ρ | MS r | FP r | FP ρ | S669 strict r | S461 r | Ssym dir r | Dom ρ_dom | Abund ρ | MS site/within |

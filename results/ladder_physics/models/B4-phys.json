@@ -1,7 +1,7 @@
 {
  "name": "B4-phys",
- "created": "2026-10-26T16:00:45",
- "git_commit": "c6ddfb4",
+ "created": "2026-10-26T17:19:51",
+ "git_commit": "9743124",
  "config": {
   "features": [
    "e_lj_atr",
@@ -117,7 +117,8 @@
    "transform": "slog_rep",
    "pro": "none",
    "avg": "avg",
-   "drefp": true
+   "drefp": true,
+   "cxxc": false
   },
   "caps": null,
   "selection": "results/ladder_physics/selection.csv (Megascale-val natural + train grouped CV)"
@@ -2594,7 +2595,9 @@
   "transform": "slog_rep",
   "pro": "none",
   "avg": "avg",
-  "drefp": true
+  "drefp": true,
+  "cxxc": false
  },
- "stage": 1
+ "stage": 1,
+ "cxxc_exception": false
 }
