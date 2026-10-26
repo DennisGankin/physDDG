@@ -118,7 +118,8 @@ Runtime here (single GPU, all residues of a chain): stage 1 mean 1.1 s, stage 2 
   on the *uncapped* repulsive branch raw = eps((R_r/r)^6 − 1)^2 (r² floored at 0.01 Å²), 1-4 scaled like lj_rep;
   appended after hb_bb_bb. `MutateConfig.rep_soft = 1.0` (kcal/mol) turns it on for the feature runs; it is a feature
   only (the packing energy U still uses the hard-capped lj_rep).
-- Feature files `data/features/phys_s{1,2}_<dataset>_cap{A,B,C}.parquet` (`55_phys_features.py --variants`):
+- Feature files `data/features/phys_s{1,2}_<dataset>_cap{A,B,C}.parquet` (`55_phys_features.py --variants`;
+  runtime per variant: stage 1 ≈ 4–5 min, stage 2 ≈ 15–20 min wall on GPUs 0–1):
   capA c0=1,c1=0; capB c0=3,c1=0 (= old features + soft column); capC c0=1,c1=2. Unit-weight quick look:
   | variant | Ssym lj_rep r(dir,−rev) / bias | lj_rep_soft r / bias | raw dF bias | MS-val natural ρ_prot (raw dF) |
   |---|---|---|---|---|
@@ -135,7 +136,11 @@ X[s, e, a] for F, per-term ⟨E_k⟩, ⟨prior⟩, site entropy. Columns:
 - `rev_s2_*` = X[s, mut, wt] − X[s, mut, mut]: mut→wt scored on the modelled mutant environment;
 - `fz_s2_*`  = X[s, wt, mut] − X[s, wt, wt]: wt→mut in the frozen WT-relaxed environment (same definition, so
   ½(fz − rev) is a proper symmetrised score); `sym_s2_dF` = ½(fz_s2_dF − rev_s2_dF).
-Without flexible neighbours rev = −fz exactly (test). Cost: one extra [S, 20, 20, R, K, C] contraction per chunk,
+Without flexible neighbours rev = −fz exactly (test). First look (capA, unit weights): Ssym r(dir, −rev) of
+sym_s2_dF = 0.15 (s2_dF 0.12), bias +3.5: symmetrising on one structure does **not** recover cross-structure
+antisymmetry, because the modelled mutant environment stays close to the WT crystal environment (fixed backbone,
+neighbours move little) while the real mutant crystal is repacked around the mutant. MS-val natural ρ_prot (raw):
+s2_dF 0.558, fz_s2_dF 0.566, sym_s2_dF 0.540. Cost: one extra [S, 20, 20, R, K, C] contraction per chunk,
 < 5% of stage-2 runtime. Note the site's own backbone is not relaxed, so X→Pro stays ≈ ±35 kcal/mol in both directions.
 
 ### (3) Backbone ensemble (G3 pre-test; `stage1_ensemble`, scripts/58_backbone_ensemble.py; Megascale-val only)
