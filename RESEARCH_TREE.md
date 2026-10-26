@@ -11,7 +11,10 @@ Decisions are logged as D<n> (see bottom). Dates are 2026.
 - [x] 1.1 LITERATURE.md (1,003 lines + notes/lit_*.md): targets table (Megascale-test ρ: FoldX 0.569, PhysDDG v1.2 0.640, ThermoMPNN 0.725, SPURS 0.74; S461 DDGun3D 0.635; Domainome FoldX 0.391, ESM-MSR 0.573)
   - [!] 1.1a Site-only oracle (LOO site mean) = 0.757 pooled ρ on Megascale-test; site+aa additive 0.800 → per-site sensitivity is where the accuracy lives (lit agent, scripts/lit_*.py)
   - [-] 1.1b Refitting FoldX's 22 terms under grouped CV is worse than stock FoldX (0.541 vs 0.569): reweighting FoldX-style terms is a dead end
-  - [ ] 1.1c Competitor baselines KORPM, DDGun3D on our tables (agent: competitors)
+  - [x] 1.1c Competitors KORPM / DDGun / DDGun3D on all our tables (reproduce literature: KORPM Ssym r 0.695, DDGun3D S669 r 0.421) — notes/competitors.md
+    - Megascale-test pooled ρ: KORPM 0.482, DDGun3D 0.458 (FoldX 0.569); FireProt-test 0.408 / 0.431 (FoldX 0.449); S461 0.557 / 0.573; Ssym 0.718 / 0.534
+    - [!] KORPM is trained on ThermoMutDB+ProTherm: 90% of FireProt, 69% S669, 97% Ssym rows have training homologues; S669 ρ 0.337 → 0.148 on strict subset. Classical sets are not clean tests for any fitted classical method; Megascale and Domainome are (no overlap)
+    - KORPM 0.44 ms/mutation on one core: our speed target must be compared with this, not FoldX
   - [x] 1.1d tmol 0.2.0 (beta_nov2016, GPU) as reference engine — notes/tmol_eval.md
     - Megascale-test: raw 0.492 (rep. blow-ups, Pearson 0.18); 12-term refit + 20 ref energies 0.596 (per-prot 0.626), ≈ FoldX / B3+; 3.1 min per 349-res scan (ours stage 2: 18.7 s per 490 res, 13-50x faster)
     - [!] tmol-refit correlates only 0.76 with B3+ and 0.66 with FoldX; equal-weight sums gain ~+0.03 over B3+ (indicative, test z-scores)
