@@ -92,3 +92,74 @@ Runtime here (single GPU, all residues of a chain): stage 1 mean 1.1 s, stage 2 
 - No backbone flexibility; D9 cap parameters (cap0, cap1) are exposed but features were computed with a uniform cap
   (3 kcal/mol/pair); changing them requires a rerun (Stage 1 ≈ 5 min, Stage 2 ≈ 15 min for all tables).
 - torch.compile (energy.enable_compile) not used (compile overhead per shape; could give ~1.5–2×).
+
+## Requests from the fitting agent (2026-10-26)
+- **R-fit1 (test hygiene, audit item 11): the WT→WT test in `tests/test_mutate.py:43-45` is tautological.**
+  `dF` is defined as `F − F[wt]`, so the WT column is 0 by construction and the test cannot fail. It therefore does
+  not check D6. Please replace it with a test of the property that actually matters: (a) the candidate rotamer *set*
+  at the site is identical for WT and every mutant (library-only, no native rotamer), e.g. assert that re-running
+  the site scan with the WT residue relabelled as a "mutation" to its own identity reproduces F(wt) exactly, and
+  (b) that `F(a)` computed from a scan seeded with a different resident residue at the site (same backbone, same
+  environment) equals `F(a)` from the WT-seeded scan, within tolerance. (b) is the real symmetry claim and is what
+  the Ssym diagnostic needs; if it does not hold, that difference *is* the native-adaptation bias and we should
+  measure it directly rather than infer it from Ssym.
+- **R-fit2 (already in progress):** capped-repulsion variants (`_capA`/`_capB`) and reverse-scoring columns. When
+  they land I will select the cap setting by grouped CV on Megascale-train + val only (never on test) and report it
+  in `notes/ladder_physics.md`.
+
+## v2 additions (2026-10-26, requests from the fitting lead via PI)
+
+### (1) D9 repulsion-cap variants + softened repulsion column
+- `MutateConfig.cap0/cap1`: per-residue cap = cap0 + cap1·rigidity (pair cap = max of the two atoms' residues);
+  rigidity = clip((smooth CB contact number − 8)/16, 0, 1), or a per-residue array passed as
+  `SiteScan(prot, cfg, rigidity=...)` (AF-mode hook, e.g. pLDDT/100). c1 > 0 = stiffer repulsion at buried/confident
+  sites; c1 < 0 is allowed.
+- `EnergyParams.rep_soft` (energy.py, default 0 = unchanged): extra term `lj_rep_soft` = s·log1p(raw/s) per atom pair
+  on the *uncapped* repulsive branch raw = eps((R_r/r)^6 − 1)^2 (r² floored at 0.01 Å²), 1-4 scaled like lj_rep;
+  appended after hb_bb_bb. `MutateConfig.rep_soft = 1.0` (kcal/mol) turns it on for the feature runs; it is a feature
+  only (the packing energy U still uses the hard-capped lj_rep).
+- Feature files `data/features/phys_s{1,2}_<dataset>_cap{A,B,C}.parquet` (`55_phys_features.py --variants`):
+  capA c0=1,c1=0; capB c0=3,c1=0 (= old features + soft column); capC c0=1,c1=2. Unit-weight quick look:
+  | variant | Ssym lj_rep r(dir,−rev) / bias | lj_rep_soft r / bias | raw dF bias | MS-val natural ρ_prot (raw dF) |
+  |---|---|---|---|---|
+  | capA | 0.35 / +4.2 | 0.34 / +3.2 | +4.6 | 0.562 |
+  | capB | 0.29 / +7.5 | 0.35 / +3.2 | +8.0 | 0.552 |
+  | capC | 0.29 / +7.2 | 0.35 / +3.2 | +7.6 | 0.559 |
+  The softer cap halves the repulsion bias but does not remove it: the asymmetry is a clash artefact of each structure
+  being packed around its resident residue, not a tail artefact.
+
+### (2) Reverse scoring on the modelled mutant environment (stage 2)
+After the mean-field solve, for every site the 20 residue types are re-scored (Boltzmann over the site's rotamers) in
+each of the 20 frozen mean-field environments (neighbour distributions relaxed around residue type e):
+X[s, e, a] for F, per-term ⟨E_k⟩, ⟨prior⟩, site entropy. Columns:
+- `rev_s2_*` = X[s, mut, wt] − X[s, mut, mut]: mut→wt scored on the modelled mutant environment;
+- `fz_s2_*`  = X[s, wt, mut] − X[s, wt, wt]: wt→mut in the frozen WT-relaxed environment (same definition, so
+  ½(fz − rev) is a proper symmetrised score); `sym_s2_dF` = ½(fz_s2_dF − rev_s2_dF).
+Without flexible neighbours rev = −fz exactly (test). Cost: one extra [S, 20, 20, R, K, C] contraction per chunk,
+< 5% of stage-2 runtime. Note the site's own backbone is not relaxed, so X→Pro stays ≈ ±35 kcal/mol in both directions.
+
+### (3) Backbone ensemble (G3 pre-test; `stage1_ensemble`, scripts/58_backbone_ensemble.py; Megascale-val only)
+Native + K = 8 backbones; each residue rigidly translated by a smooth random displacement field (GP sample, RBF length
+6 Å, random Fourier features) with RMS amplitude 0.3 or 0.6 Å (peptide C–N length changes: RMS 0.09 Å, max 0.3 Å at
+0.3 Å amplitude; the energy has no bonded terms). φ/ψ and rotamer candidates are kept from the native structure.
+Aggregates: mean over backbones, Boltzmann over backbones (no strain energy: upper bound on relaxation).
+B4 weights applied unchanged (not refitted) to the ensemble stage-1 features (n = 17,908 natural val rows; buried
+small→large n = 1,402):
+| amp | aggregate | raw dF ρ_prot | raw pooled | raw buried s→l | B4 ρ_prot | B4 pooled | B4 buried s→l |
+|---|---|---|---|---|---|---|---|
+| – | native | 0.552 | 0.554 | 0.310 | **0.7265** | 0.7027 | 0.349 |
+| 0.3 | mean | 0.534 | 0.552 | 0.304 | 0.7257 | 0.7021 | 0.351 |
+| 0.3 | Boltzmann | 0.550 | 0.561 | 0.315 | 0.7253 | 0.7025 | 0.358 |
+| 0.6 | mean | 0.521 | 0.535 | 0.292 | 0.7233 | 0.6992 | 0.342 |
+| 0.6 | Boltzmann | 0.542 | 0.556 | 0.318 | 0.7188 | 0.6969 | 0.355 |
+Verdict: **no gain overall** (−0.001 to −0.008 ρ_prot); buried small→large +0.009 at most (B4, Boltzmann, 0.3 Å),
+below the G3 bar. Cost: 9× stage 1 (≈ 200 s for 1,510 val sites on one shared GPU, ~15 ms per site per backbone).
+Random perturbations do not find relevant relaxations; a directed relaxation (minimising the shell around the mutant)
+would be the next thing to try, but this pre-test gives no reason to prioritise it.
+
+### (4) topology.BONDS (E2 request R1)
+`topology.BONDS[aa]` (backbone + IC build tree + `RING_CLOSURES`); `energy.residue_bonds` now uses it (private table
+removed; identical bond sets, all energy tests pass).
+
+Note: `physddg/fit.py` sets torch's global default dtype to float64 on import; all SiteScan entry points now run under
+a float32 guard (`_float32`).
