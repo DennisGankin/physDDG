@@ -1,0 +1,19 @@
+{
+ "loss": "huber",
+ "ref_l2": 0.01,
+ "ref": true,
+ "opts_s1": {
+  "elec": "dh",
+  "transform": "slog_rep",
+  "pro": "none",
+  "avg": "avg",
+  "drefp": true
+ },
+ "opts_s2": {
+  "elec": "dh",
+  "transform": "slog_rep",
+  "pro": "none",
+  "avg": "avg",
+  "drefp": false
+ }
+}

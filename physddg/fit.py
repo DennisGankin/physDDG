@@ -57,6 +57,8 @@ class FitConfig:
     signs: dict = field(default_factory=dict)  # feature -> +1 / -1
     l2: float = 1e-6                  # tiny ridge on standardised weights
     intercept: bool = True
+    sym_pair: bool = False            # symmetric (wt,mut) offset S(a,b) = S(b,a), 190 values (adaptation bias, D15)
+    sym_l2: float = 1e-2
     seed: int = 0
 
 
@@ -86,6 +88,15 @@ def prepare_targets(df: pd.DataFrame, kind: str | None = None, floor_censor: boo
     return d.reset_index(drop=True)
 
 
+PAIR_KEYS = [a + b for i, a in enumerate(AA1) for b in AA1[i + 1:]]          # 190 unordered pairs, a < b in AA1 order
+_PAIR_IDX = {k: n for n, k in enumerate(PAIR_KEYS)}
+
+
+def _pair_index(iw, im) -> np.ndarray:
+    lo, hi = np.minimum(iw, im), np.maximum(iw, im)
+    return np.array([_PAIR_IDX.get(AA1[a] + AA1[b], 0) for a, b in zip(lo, hi)], np.int64)
+
+
 # ----------------------------------------------------------------------------- core
 class _Problem:
     """Tensors + parameter layout for one fit configuration on one training table."""
@@ -108,7 +119,9 @@ class _Problem:
         self.di = d["dataset"].astype(str).map({k: i for i, k in enumerate(self.datasets)}).to_numpy()
         X = d[list(cfg.features)].to_numpy(float)
         self.mu_x = np.zeros(X.shape[1])          # no centring: keep zero-feature = zero-effect meaning
-        self.sd_x = np.where(X.std(0) > 0, X.std(0), 1.0)
+        sd = X.std(0)
+        self.inactive = [f for f, v in zip(cfg.features, sd) if v < 1e-6]   # (near-)constant: weight pinned to 0
+        self.sd_x = np.where(sd >= 1e-6, sd, 1.0)
         T = lambda a, dt=torch.float64: torch.as_tensor(np.asarray(a), dtype=dt)
         self.X = T(X / self.sd_x)
         self.iw = T(d["wt"].map(AA_INDEX).to_numpy(), torch.long)
@@ -134,6 +147,8 @@ class _Problem:
         add("w0", 1 if cfg.intercept else 0)
         add("w", K)
         add("dref", 20 if cfg.ref else 0)
+        add("spair", 190 if cfg.sym_pair else 0)
+        self.ipair = torch.as_tensor(_pair_index(self.iw.numpy(), self.im.numpy()))
         self.nuis = [ds for ds in cfg.ref_nuisance if ds in self.datasets]
         add("dnuis", 20 * len(self.nuis))
         self.other = [ds for ds in self.datasets if ds != self.refd] if cfg.scale_offset else []
@@ -149,6 +164,8 @@ class _Problem:
             s = cfg.signs.get(f, 0)
             j = lay["w"][0].start + k
             bounds[j] = (0.0, None) if s > 0 else (None, 0.0) if s < 0 else (None, None)
+            if f in self.inactive:
+                bounds[j] = (0.0, 0.0)
         self.bounds = bounds
 
     def _row_weights(self) -> np.ndarray:
@@ -199,7 +216,11 @@ class _Problem:
         if self.cfg.intercept:
             out = out + self.get(th, "w0")[0]
         r = self.prior + (self.get(th, "dref") if self.cfg.ref else 0.0)
-        return out + r[im] - r[iw]
+        out = out + r[im] - r[iw]
+        if self.cfg.sym_pair:
+            ip = self.ipair if X is None else torch.as_tensor(_pair_index(iw.numpy(), im.numpy()))
+            out = out + self.get(th, "spair")[ip]
+        return out
 
     def mu(self, th):
         m = self.core(th)
@@ -246,6 +267,8 @@ class _Problem:
         obj = obj + cfg.l2 * (self.get(th, "w") ** 2).sum()
         if cfg.ref:
             obj = obj + cfg.ref_l2 * (self.get(th, "dref") ** 2).sum()
+        if cfg.sym_pair:
+            obj = obj + cfg.sym_l2 * (self.get(th, "spair") ** 2).sum()
         if self.nuis:
             obj = obj + cfg.nuis_l2 * (self.get(th, "dnuis") ** 2).sum()
         return obj
@@ -277,6 +300,7 @@ class _Problem:
         out = {"intercept": float(g("w0")[0]) if self.cfg.intercept else 0.0,
                "weights": dict(zip(self.cfg.features, (g("w") / self.sd_x).tolist())),
                "ref": dict(zip(AA1, (self.prior.numpy() + (g("dref") if self.cfg.ref else 0.0)).tolist())) if self.cfg.ref else {},
+               "sym_pair": dict(zip(PAIR_KEYS, g("spair").tolist())) if self.cfg.sym_pair else {},
                "nuisance": {"scale": dict(zip(self.other, g("a").tolist())), "offset": dict(zip(self.other, g("b").tolist())),
                             "sigma": dict(zip(self.datasets, np.exp(g("logsig")).tolist())) if self.cfg.loss == "gauss" else {},
                             "delta_ref": {ds: dict(zip(AA1, g("dnuis").reshape(len(self.nuis), 20)[k].tolist()))
@@ -308,7 +332,7 @@ def fit(df: pd.DataFrame, cfg: FitConfig, n_boot: int = 0, n_jobs: int = 8, name
     x, res = prob.solve()
     model = {"name": name, "created": datetime.now().isoformat(timespec="seconds"), "git_commit": _git(),
              "config": _jsonable(asdict(cfg)), **prob.unpack(x),
-             "converged": bool(res.success), "objective": float(res.fun), "message": str(res.message),
+             "inactive_features": prob.inactive, "converged": bool(res.success), "objective": float(res.fun), "message": str(res.message),
              "train": {ds: {"n_rows": int((g := prob.df[prob.df.dataset == ds]).shape[0]),
                             "n_point": int(g.y.notna().sum()), "n_interval": int(g.y.isna().sum()),
                             "n_proteins": int(g.protein_id.nunique()), "n_clusters": int(g.cluster.nunique()),
@@ -334,6 +358,9 @@ def predict(model: dict, df: pd.DataFrame) -> np.ndarray:
     if model.get("ref"):
         r = model["ref"]
         p = p + df["mut"].map(r).to_numpy(float) - df["wt"].map(r).to_numpy(float)
+    if model.get("sym_pair"):
+        key = [a + b if a < b else b + a for a, b in zip(df["wt"], df["mut"])]
+        p = p + pd.Series(key).map(model["sym_pair"]).fillna(0.0).to_numpy(float)
     return p
 
 

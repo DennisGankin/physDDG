@@ -1,0 +1,102 @@
+{
+ "name": "B5-dF",
+ "created": "2026-10-26T16:05:51",
+ "git_commit": "c6ddfb4",
+ "config": {
+  "features": [
+   "dF"
+  ],
+  "ref": true,
+  "ref_prior": null,
+  "ref_l2": 0.01,
+  "ref_nuisance": [],
+  "nuis_l2": 0.001,
+  "scale_offset": true,
+  "ref_dataset": "megascale",
+  "loss": "huber",
+  "huber_delta": 1.0,
+  "censor": true,
+  "rank_weight": 0.0,
+  "rank_margin": 0.5,
+  "rank_pairs": 1000,
+  "rank_tau": 0.5,
+  "weighting": "clusters",
+  "within": "rows",
+  "signs": {
+   "dF": 1
+  },
+  "l2": 1e-06,
+  "intercept": true,
+  "sym_pair": false,
+  "sym_l2": 0.01,
+  "seed": 0
+ },
+ "intercept": 0.4875799820916538,
+ "weights": {
+  "dF": 0.37327860086417675
+ },
+ "ref": {
+  "A": 0.14309423705720428,
+  "C": -0.3815970781776391,
+  "D": 0.11780955614882155,
+  "E": 0.1338521477806693,
+  "F": -0.09207225897898152,
+  "G": 0.10251179757169876,
+  "H": 0.2701834648572983,
+  "I": -0.16076858624008988,
+  "K": 0.10247326086490335,
+  "L": -0.15577751667745657,
+  "M": -0.14926312061252706,
+  "N": 0.03703649584276826,
+  "P": 0.3476115388605443,
+  "Q": 0.09188248085494895,
+  "R": -0.06229657379400941,
+  "S": 0.030489852223681675,
+  "T": -0.09762851377772236,
+  "V": -0.1550974260209094,
+  "W": -0.06071963669626593,
+  "Y": -0.06172412108696733
+ },
+ "sym_pair": {},
+ "nuisance": {
+  "scale": {},
+  "offset": {},
+  "sigma": {},
+  "delta_ref": {}
+ },
+ "inactive_features": [],
+ "converged": true,
+ "objective": 0.34486758844423726,
+ "message": "CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH",
+ "train": {
+  "megascale": {
+   "n_rows": 227094,
+   "n_point": 215731,
+   "n_interval": 11363,
+   "n_proteins": 239,
+   "n_clusters": 96,
+   "total_weight": 1.0000000000000002
+  }
+ },
+ "provenance": {
+  "train": "megascale train (Dataset 3 + censored)",
+  "features": "data/features/phys_s2_*.parquet + simple_*",
+  "opts": {
+   "elec": "dh",
+   "transform": "slog_rep",
+   "pro": "none",
+   "avg": "avg",
+   "drefp": false
+  },
+  "caps": null,
+  "selection": "results/ladder_physics/selection.csv (Megascale-val natural + train grouped CV)"
+ },
+ "derive_opts": {
+  "elec": "dh",
+  "transform": "slog_rep",
+  "pro": "none",
+  "avg": "avg",
+  "drefp": false
+ },
+ "stage": 2
+}
