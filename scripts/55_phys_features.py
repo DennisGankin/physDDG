@@ -38,9 +38,7 @@ ALL = ["megascale", "fireprot", "s669", "s461", "ssym", "paired_af", "paired_af_
 KEYS = FS.KEYS
 
 
-VARIANTS = {  # D9 repulsion-cap settings (file suffix -> MutateConfig overrides); "" = defaults (= capB + soft term)
-    "": {}, "capA": {"cap0": 1.0, "cap1": 0.0}, "capB": {"cap0": 3.0, "cap1": 0.0}, "capC": {"cap0": 1.0, "cap1": 2.0},
-}
+from physddg.mutate import CAP_VARIANTS as VARIANTS  # noqa: E402  (D9 cap settings; "" = defaults = capB + soft term)
 
 
 def make_cfg(variant: str):

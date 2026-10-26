@@ -30,7 +30,7 @@ from . import topology as T
 
 ROOT = Path(__file__).resolve().parents[1]
 MODELS = ROOT / "results" / "ladder_physics" / "models"
-DEFAULT_WEIGHTS = {1: MODELS / "B4.json", 2: MODELS / "B5.json"}
+DEFAULT_WEIGHTS = {1: MODELS / "B4.json", 2: MODELS / "B5.json"}   # legacy; see default_weights()
 KEYS = ["protein_id", "chain", "pdb_resnum", "wt", "mut"]
 KT = 0.593
 TERMS = ["lj_atr", "lj_rep", "solv_apolar", "solv_polar", "hb_sc_bb", "hb_sc_sc", "hb_bb_bb", "ELEC", "disulf"]
@@ -120,16 +120,27 @@ def engine_columns(z: dict, g: pd.DataFrame, stage: int) -> pd.DataFrame:
 
 # ============================================================================= model transform (mirrors 52.derive)
 def derive(d: pd.DataFrame, stage: int, opts: dict, caps: dict | None = None) -> pd.DataFrame:
-    """Model inputs from feature columns, identical to scripts/52_ladder_physics.derive for the shipped options."""
+    """Model inputs from feature columns; mirrors scripts/52_ladder_physics.derive. Cap variants (opts['cap']):
+    the engine is run with that variant's MutateConfig, so its columns carry no suffix here (52 merges several
+    variants side by side with a `_<cap>` suffix; both resolve to the same numbers)."""
     d = d.copy()
     s = f"s{stage}"
+    cap = opts.get("cap", "")
+    sfx = f"_{cap}" if cap else ""
     mid = "dEmin" if (opts.get("avg") == "min" and stage == 1) else "dE"
     tr = opts["transform"]
     slog = lambda x: np.sign(x) * np.log1p(np.abs(x))
     for t in TERMS:
         name = f"elec_{opts['elec']}" if t == "ELEC" else t
-        x = d[f"{s}_{mid}_{name}"].astype(float)
-        if tr == "slog_all" or (tr == "slog_rep" and t == "lj_rep"):
+        src = f"{s}_{mid}_{name}"
+        if t == "lj_rep" and opts.get("rep") == "soft":
+            src = f"{s}_{mid}_lj_rep_soft{sfx}" if f"{s}_{mid}_lj_rep_soft{sfx}" in d else f"{s}_{mid}_lj_rep_soft"
+        elif cap and f"{src}{sfx}" in d:
+            src = f"{src}{sfx}"
+        x = d[src].astype(float)
+        if opts.get("rep") == "soft" and t == "lj_rep":
+            pass                                           # already saturating: no extra transform
+        elif tr == "slog_all" or (tr == "slog_rep" and t == "lj_rep"):
             x = slog(x)
         elif tr.startswith("clip_rep") and t == "lj_rep":
             c = float(tr[8:])
@@ -143,7 +154,8 @@ def derive(d: pd.DataFrame, stage: int, opts: dict, caps: dict | None = None) ->
         d["e_lj_rep"] = d["e_lj_rep"] * (1 - isp)
     d["dTS"], d["dprior_avg"] = d[f"{s}_dTS"], d[f"{s}_dprior_avg"]
     d["dref_apolar"], d["dref_polar"] = d[f"{s}_dref_apolar"], d[f"{s}_dref_polar"]
-    d["dF"] = slog(d[f"{s}_dF"]) if tr != "none" else d[f"{s}_dF"]
+    fcol = f"{s}_dF{sfx}" if (cap and f"{s}_dF{sfx}" in d) else f"{s}_dF"
+    d["dF"] = slog(d[fcol]) if tr != "none" else d[fcol]
     if "ss_broken" in d:
         d["ss_broken"] = d["ss_broken"].fillna(0)
         d["ss_broken_nc"] = d["ss_broken"] * (~d.get("cxxc", pd.Series(False, index=d.index)).astype(bool))
@@ -162,8 +174,9 @@ def cxxc(prot, rows: pd.DataFrame) -> pd.Series:
 
 
 # ============================================================================= flags
-def site_flags(prot, idx: np.ndarray, mode: str = "xtal") -> list[str]:
-    """Per-site warning flags (see module docstring)."""
+def site_flags(prot, idx: np.ndarray, mode: str = "xtal") -> tuple[list[str], list[bool]]:
+    """Per-site warning flags (see module docstring) and the AF-mode `withheld` indicator
+    (pLDDT < 70 | terminal | exposed hydrophobic patch | metal site; always False in xtal mode)."""
     a = prot.ann
     ca = np.nan_to_num(prot.xyz14[:, 1])
     from .structure import cb_coords
@@ -176,8 +189,12 @@ def site_flags(prot, idx: np.ndarray, mode: str = "xtal") -> list[str]:
     ends = starts | np.r_[starts[1:], True]
     end_idx = np.flatnonzero(ends)
     het = prot.het_xyz[~np.isin(prot.het_resname, ["HOH", "WAT", "DOD"])] if len(prot.het_xyz) else np.zeros((0, 3))
-    out = []
-    for i in idx:
+    af = None
+    if mode == "af":
+        from . import afmode
+        af = afmode.flags(prot, np.asarray(idx))
+    out, withheld = [], []
+    for k, i in enumerate(idx):
         f = []
         if prot.missing_sc[i] or not prot.mask14[i, :4].all():
             f.append("site_missing_atoms")
@@ -190,24 +207,18 @@ def site_flags(prot, idx: np.ndarray, mode: str = "xtal") -> list[str]:
                 f.append("hetatm_5A")
         if (brk_res & (np.linalg.norm(ca - ca[i], axis=1) < 10.0)).any():
             f.append("chain_break_10A")
-        same = prot.chain[end_idx] == prot.chain[i]
-        if len(end_idx) and (np.abs(end_idx[same] - i) <= 2).any():
-            f.append("terminal")
-        if mode == "af" and prot.bfactor[i] < 70:
-            f.append("low_plddt")
+        if af is None:
+            same = prot.chain[end_idx] == prot.chain[i]
+            if len(end_idx) and (np.abs(end_idx[same] - i) <= 2).any():
+                f.append("terminal")
+            withheld.append(False)
+        else:
+            names = ("low_plddt", "very_low_plddt", "near_low_plddt", "terminal", "exposed_hydrophobic_patch", "metal_site")
+            f += [n for n in names if bool(af[n][k])]
+            withheld.append(bool(af["low_plddt"][k] or af["terminal"][k] or af["exposed_hydrophobic_patch"][k]
+                                 or af["metal_site"][k]))
         out.append(";".join(f))
-    if mode == "af":
-        try:
-            from . import afmode
-            af = afmode.flags(prot, np.asarray(idx))
-            names = [k for k, v in af.items() if isinstance(v, np.ndarray) and v.dtype == bool and len(v) == len(idx)]
-            for k_, i in enumerate(idx):
-                extra = [f"af_{n}" for n in names if af[n][k_]]
-                if extra:
-                    out[k_] = ";".join([x for x in [out[k_]] if x] + extra)
-        except Exception:  # noqa: BLE001  (AF-mode module optional)
-            pass
-    return out
+    return out, withheld
 
 
 # ============================================================================= mutation parsing
@@ -240,21 +251,75 @@ def parse_sites(spec: str | None) -> set | None:
 
 
 # ============================================================================= predictor
+def default_weights(stage: int, mode: str = "xtal") -> Path:
+    """Shipped model for (stage, mode): final_* (fitting agent's D19 files) if present, else the newest B6 family."""
+    if mode == "af":
+        cands = ["final_af.json", "B6gaf.json", "B6af.json"] if stage == 2 else ["final_af_s1.json", "B6gaf_s1.json",
+                                                                                 "B6af_s1.json"]
+    else:
+        cands = ["final_stage2.json", "B6g.json", "B6.json", "B5.json"] if stage == 2 else \
+            ["final_stage1.json", "B6gs1.json", "B6s1.json", "B4.json"]
+    for c in cands:
+        if (MODELS / c).exists():
+            return MODELS / c
+    raise FileNotFoundError(f"no model for stage {stage}, mode {mode} in {MODELS}")
+
+
+AF_TRIM = dict(below=50.0, window=10, termini_below=70.0, packed_exempt=True)   # D18 (MAVISp-style)
+
+
+def crop_mask(prot, spec: str) -> np.ndarray:
+    """'A:10-120,B:5-60' or '10-120' (all chains) -> residues to keep (author numbering, integer part)."""
+    keep = np.zeros(len(prot), bool)
+    num = np.array([int(re.match(r"-?\d+", r).group()) for r in prot.resnum])
+    for part in spec.split(","):
+        part = part.strip()
+        ch, rng = (part.split(":", 1) if ":" in part else (None, part))
+        m = re.match(r"^(-?\d+)-(-?\d+)$", rng)
+        if not m:
+            raise ValueError(f"bad crop range {part!r}")
+        sel = (num >= int(m.group(1))) & (num <= int(m.group(2)))
+        if ch is not None:
+            sel &= prot.chain == ch
+        keep |= sel
+    return keep
+
+
+def _as_pdb(structure: str, tmp: Path) -> Path:
+    """PDB-format copy for text-level trimming (mmCIF / gz inputs are converted with gemmi)."""
+    s = str(structure)
+    if s.endswith(".pdb") or s.endswith(".ent"):
+        return Path(s)
+    import gemmi
+    st = gemmi.read_structure(s)
+    st.setup_entities()
+    out = tmp / (Path(s).name.split(".")[0] + ".pdb")
+    st.write_pdb(str(out))
+    return out
+
+
 class PhysDDG:
-    """Structure-based physics-inspired ddG predictor (see module docstring)."""
+    """Structure-based physics-inspired ddG predictor (see module docstring).
+
+    mode='xtal': fixed input structure, no pLDDT treatment (attenuation is never applied).
+    mode='af' (D18): optional construct crop, MAVISp-style trim of low-pLDDT windows / termini (packed-exempt),
+    stage 2 (shell repack, AF side chains kept elsewhere), pLDDT attenuation of the AF model weights, AF-mode flags
+    and the `withheld` indicator (pLDDT < 70 | terminal | exposed hydrophobic patch | metal site)."""
 
     def __init__(self, weights: str | Path | None = None, stage: int | None = None, device: str = "cuda",
-                 mode: str = "xtal", cfg=None):
+                 mode: str = "xtal", cfg=None, trim: bool | None = None):
         import sys
         import torch
-        if "physddg.fit" not in sys.modules:       # fit.py sets torch's default dtype to float64 on import: undo here
+        if "physddg.fit" not in sys.modules:       # older fit.py set torch's default dtype at import: undo here
             old = torch.get_default_dtype()
             from . import fit  # noqa: F401
             torch.set_default_dtype(old)
         from . import fit as FT
         self._FT = FT
+        if mode not in ("xtal", "af"):
+            raise ValueError("mode must be 'xtal' or 'af'")
         if weights is None:
-            weights = DEFAULT_WEIGHTS[stage or 1]
+            weights = default_weights(stage or (2 if mode == "af" else 1), mode)
         self.model = FT.load_model(weights)
         self.weights_path = str(weights)
         self.stage = int(self.model.get("stage", stage or 1))
@@ -262,9 +327,11 @@ class PhysDDG:
             raise ValueError(f"weights {weights} were fitted on stage-{self.stage} features, not stage {stage}")
         self.opts = self.model["derive_opts"]
         self.caps = self.model.get("provenance", {}).get("caps")
+        self.scale_kind = self.model.get("scale_kind")
         self.device, self.mode = device, mode
-        from .mutate import MutateConfig
-        self.cfg = cfg or MutateConfig()
+        self.trim = (mode == "af") if trim is None else trim
+        from .mutate import CAP_VARIANTS, MutateConfig
+        self.cfg = cfg or MutateConfig(**CAP_VARIANTS.get(self.opts.get("cap", "") or "", {}))
         self.timing: dict = {}
 
     # ------------------------------------------------------------------ building blocks
@@ -289,31 +356,66 @@ class PhysDDG:
         rows["protein_id"] = Path(str(structure)).stem
         return rows
 
-    def features(self, prot, structure: str, rows: pd.DataFrame, site_tab: pd.DataFrame | None = None) -> pd.DataFrame:
-        """All model input columns for rows (engine + statistics + simple structure features)."""
+    def features(self, prot, structure: str, rows: pd.DataFrame, site_tab=None,
+                 struct_source: str | None = None) -> pd.DataFrame:
+        """All model input columns for rows: engine (mutate.py), structure statistics (features_simple) and the
+        B6 site / substitution terms (features_extra), merged exactly as scripts/52_ladder_physics.py does.
+        site_tab: optional precomputed {'simple': features_simple.site_table, 'extra': features_extra.site_descriptors}."""
+        from . import features_extra as X
         from . import features_simple as FS
         from .mutate import SiteScan
         t0 = time.time()
         key = {(c, r): i for i, (c, r) in enumerate(zip(prot.chain.tolist(), prot.resnum.tolist()))}
         idx = np.array(sorted({key[(c, r)] for c, r in zip(rows.chain, rows.pdb_resnum) if (c, r) in key}), np.int64)
-        sc = SiteScan(prot, self.cfg, self.device)
+        if "nterm_orig" in prot.ann:                 # trimmed / cropped model: no invented charged termini
+            from . import afmode
+            sc = afmode.site_scan(prot, self.cfg, self.device)
+        else:
+            sc = SiteScan(prot, self.cfg, self.device)
         z = site_arrays(prot, idx, sc, self.stage) if len(idx) else {}
         t1 = time.time()
         eng = engine_columns(z, rows, self.stage)
-        sites = site_tab if site_tab is not None else FS.site_table(str(structure))
+        site_tab = site_tab or {}
+        sites = site_tab.get("simple")
+        sites = sites if sites is not None else FS.site_table(str(structure))
         simple = FS.variant_features(rows[KEYS + ["structure"]], sites)
         simple.index = rows.index
         df = pd.concat([rows, eng, simple[[c for c in simple.columns if c not in rows.columns and c not in eng.columns]]],
                        axis=1)
-        df = pd.concat([df, cxxc(prot, rows).rename("cxxc")], axis=1)
+        df = pd.concat([df, cxxc(prot, rows).rename("cxxc")], axis=1).copy()
+        if struct_source is not None:
+            df = df.assign(struct_source=struct_source)
+        # B6 terms (features_extra), as 52.add_extra: x_-prefixed site descriptors + candidate_features
+        ex = site_tab.get("extra")
+        ex = ex if ex is not None else X.site_descriptors(str(structure))
+        ex = ex.drop(columns=["structure_abs"]).add_prefix("x_").rename(columns={"x_chain": "chain",
+                                                                                "x_pdb_resnum": "pdb_resnum"})
+        ex["pdb_resnum"] = ex["pdb_resnum"].astype(str)
+        ex["chain"] = ex["chain"].astype(str)
+        d = df.reset_index().merge(ex, on=["chain", "pdb_resnum"], how="left").set_index("index").copy()
+        d.index.name = None
+        miss = {c: np.nan for c in ("s1_dE_lj_rep", "s2_dE_lj_rep") if c not in d}
+        d = d.assign(**miss)                         # candidate_features reads s2_dE_lj_rep (unused by shipped terms)
+        cand = X.candidate_features(d)
+        df = pd.concat([d, cand[[c for c in cand.columns if c not in d.columns]]], axis=1)
         self.timing.update(engine_s=t1 - t0, simple_s=time.time() - t1, n_sites=len(idx))
         self._idx, self._key = idx, key
         return df
 
+    def _atten(self, d: pd.DataFrame) -> np.ndarray:
+        if self.scale_kind == "plddt":
+            return d["flag_lowplddt"].to_numpy(float)
+        if self.scale_kind == "burial":
+            return (1.0 - d["x_rsa"].clip(0, 1)).to_numpy(float)
+        raise ValueError(f"unknown scale_kind {self.scale_kind!r}")
+
     def score(self, df: pd.DataFrame, terms: bool = False) -> pd.DataFrame:
-        """Apply the linear model to feature columns (as produced by `features`)."""
+        """Apply the linear model (two-stage when the model has `scale_kind`) to feature columns from `features`."""
         FT = self._FT
         d = derive(df, self.stage, self.opts, self.caps)
+        if self.scale_kind:
+            col = f"scale_{self.scale_kind}"
+            d[col] = FT.predict(self.model["scale_base"], d) * self._atten(d)
         pred = FT.predict(self.model, d)
         out = pd.DataFrame({"ddg": pred}, index=df.index)
         same = (df.wt == df.mut).to_numpy()
@@ -326,11 +428,39 @@ class PhysDDG:
             out["c_intercept"] = np.where(same, 0.0, float(self.model["intercept"]))
         return out
 
+    # ------------------------------------------------------------------ AF-mode preparation (D18)
+    def _af_models(self, structure: str, prot, crop: str | None, tmp: Path):
+        """(full-or-cropped model, its file, trimmed model, its file, keep mask relative to the cropped model)."""
+        from . import afmode
+        base_file = _as_pdb(structure, tmp)
+        p1, f1 = prot, Path(structure)
+        if crop:
+            keep = crop_mask(prot, crop)
+            p1 = afmode.trim_protein(prot, keep, preserve_dihedrals=False)   # = a construct file of that range
+            p1.ann.pop("nterm_orig", None)           # construct boundaries are real termini (as in the assay)
+            f1 = tmp / "crop.pdb"
+            afmode.write_trimmed_pdb(base_file, set(p1.keys), f1)
+        if not self.trim:
+            return p1, f1, None, None
+        keep2 = afmode.trim_mask(p1, afmode.TrimConfig(**AF_TRIM))
+        if keep2.all():
+            return p1, f1, None, None
+        p2 = afmode.trim_protein(p1, keep2)
+        if "nterm_orig" in p1.ann:                   # chain starts relative to the original model
+            p2.ann["nterm_orig"] = np.asarray(p1.ann["nterm_orig"])[keep2]
+        f2 = tmp / "trim.pdb"
+        afmode.write_trimmed_pdb(base_file, set(p2.keys), f2)
+        return p1, f1, p2, f2
+
     # ------------------------------------------------------------------ public API
     def predict(self, structure: str | Path, mutations=None, chain: str | None = None, scan_all: bool = False,
                 sites: str | None = None, terms: bool = False, prot=None, rows: pd.DataFrame | None = None,
-                site_tab: pd.DataFrame | None = None) -> pd.DataFrame:
-        """ddG for mutations ('A12G', ...) or a saturation scan (scan_all, optional sites '10-80')."""
+                site_tab=None, crop: str | None = None, struct_source: str | None = None) -> pd.DataFrame:
+        """ddG for mutations ('A12G', ...) or a saturation scan (scan_all, optional sites '10-80').
+        crop (AF mode): keep only these residues ('A:10-120') before anything else (assayed construct / domain).
+        struct_source: overrides the structure-type label used by the pLDDT attenuation (default: 'af' in AF mode,
+        'xtal' otherwise; only labels containing 'af' enable it)."""
+        import tempfile
         t0 = time.time()
         prot = prot if prot is not None else self.load(structure, chain)
         t1 = time.time()
@@ -343,20 +473,51 @@ class PhysDDG:
                 rows["protein_id"] = Path(str(structure)).stem
             if "mutation" not in rows:
                 rows["mutation"] = rows.wt + rows.pdb_resnum + rows.mut
-        df = self.features(prot, str(structure), rows, site_tab)
+        src = struct_source or ("af" if self.mode == "af" else "xtal")
+        trimmed_site = pd.Series(False, index=rows.index)
+        with tempfile.TemporaryDirectory() as tmpd:
+            if self.mode == "af" and (crop or self.trim):
+                p1, f1, p2, f2 = self._af_models(str(structure), prot, crop, Path(tmpd))
+                rows_feat = rows.assign(structure=str(f1))
+                if p2 is not None:
+                    kept = set(p2.keys)
+                    trimmed_site = pd.Series([(c, r) not in kept for c, r in zip(rows.chain, rows.pdb_resnum)],
+                                             index=rows.index)
+                    parts = []
+                    a = rows_feat[~trimmed_site].assign(structure=str(f2))
+                    if len(a):
+                        parts.append(self._run(p2, str(f2), a, None, src, terms))
+                    b = rows_feat[trimmed_site]
+                    if len(b):                       # site itself trimmed: score it on the untrimmed model, flagged
+                        parts.append(self._run(p1, str(f1), b, None, src, terms))
+                    out = pd.concat(parts).loc[rows.index]
+                else:
+                    out = self._run(p1, str(f1), rows_feat, None, src, terms)
+            else:
+                out = self._run(prot, str(structure), rows, site_tab, src, terms)
+        out = out.drop(columns=["structure"], errors="ignore")
+        if self.mode == "af":
+            out.loc[trimmed_site.to_numpy(), "flags"] = (out.loc[trimmed_site.to_numpy(), "flags"] + ";site_trimmed").str.strip(";")
+        self.timing.update(load_s=t1 - t0, total_s=time.time() - t0, n_variants=len(out))
+        return out
+
+    def _run(self, prot, structure: str, rows: pd.DataFrame, site_tab, src: str, terms: bool) -> pd.DataFrame:
+        df = self.features(prot, structure, rows, site_tab, src)
         sc = self.score(df, terms)
         out = rows[[c for c in rows.columns if c != "structure"]].copy()
         out["ddg"] = sc["ddg"]
         out["site_found"] = df["site_found"].astype(bool)
         out["wt_match"] = df["wt_match"].astype(bool)
-        fl = dict(zip(self._idx.tolist(), site_flags(prot, self._idx, self.mode))) if len(self._idx) else {}
+        fl, wh = site_flags(prot, self._idx, self.mode) if len(self._idx) else ([], [])
+        fl, wh = dict(zip(self._idx.tolist(), fl)), dict(zip(self._idx.tolist(), wh))
         ix = [self._key.get((c, r), -1) for c, r in zip(rows.chain, rows.pdb_resnum)]
-        out["flags"] = [("" if i < 0 else fl.get(i, "")) + ("" if wm else (";wt_mismatch" if i >= 0 else "site_not_found"))
+        out["flags"] = [("" if i < 0 else fl.get(i, "")) + ("" if wm else (";wt_mismatch" if i >= 0 else ";site_not_found"))
                         for i, wm in zip(ix, out.wt_match)]
         out["flags"] = out["flags"].str.strip(";")
+        if self.mode == "af":
+            out["withheld"] = [bool(wh.get(i, True)) for i in ix]
         if terms:
             out = pd.concat([out, sc.drop(columns="ddg")], axis=1)
-        self.timing.update(load_s=t1 - t0, total_s=time.time() - t0, n_variants=len(out))
         return out
 
 
@@ -370,13 +531,14 @@ def _prep(job):
     import os
     for v in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
         os.environ.setdefault(v, "1")
+    from . import features_extra as X
     from . import features_simple as FS
     from .structure import annotate, load_protein
     structure, rows = job
     t = time.time()
     try:
         prot = annotate(load_protein(structure, keep_het=True))
-        tab = FS.site_table(str(structure))
+        tab = {"simple": FS.site_table(str(structure)), "extra": X.site_descriptors(str(structure))}
     except Exception as e:  # noqa: BLE001
         return structure, rows, None, None, repr(e), time.time() - t
     return structure, rows, prot, tab, None, time.time() - t
@@ -394,7 +556,8 @@ def _gpu_worker(gpu: int, jobs: list, weights, stage, mode, cpus: int, terms: bo
                 try:
                     if prot is None:
                         raise RuntimeError(f"load_failed:{err}")
-                    o = m.predict(structure, rows=rows, prot=prot, site_tab=tab, terms=terms)
+                    o = m.predict(structure, rows=rows, prot=prot, site_tab=None if m.mode == "af" else tab,
+                                  terms=terms)
                     o["gpu"], o["cpu_prep_s"], o["gpu_s"] = gpu, t_cpu, m.timing["engine_s"]
                 except Exception as e:  # noqa: BLE001  (never lose the other structures)
                     o = rows.drop(columns=[c for c in ("structure",) if c in rows]).assign(

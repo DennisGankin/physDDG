@@ -71,6 +71,10 @@ class MutateConfig:
         self.params = replace(self.params, rep_scale=self.rep_scale, rep_soft=self.rep_soft)
 
 
+CAP_VARIANTS = {  # D9 repulsion-cap settings used for the feature files (suffix -> MutateConfig overrides)
+    "": {}, "capA": {"cap0": 1.0, "cap1": 0.0}, "capB": {"cap0": 3.0, "cap1": 0.0}, "capC": {"cap0": 1.0, "cap1": 2.0},
+}
+
 _LIB: RotamerLibrary | None = None
 _STATS: PDBStats | None = None
 
