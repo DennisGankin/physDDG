@@ -410,6 +410,9 @@ def run_jobs(jobs: list, gpus=(0,), weights=None, stage: int | None = None, mode
     """jobs: list of (structure, rows DataFrame with chain/pdb_resnum/wt/mut[/mutation/protein_id/...]).
     One process per GPU (greedy balance by number of distinct sites), CPU preparation in a pool per GPU process."""
     import multiprocessing as mp
+    import os
+    for v in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):   # inherited by spawned workers:
+        os.environ.setdefault(v, "1")                                           # avoid 64 BLAS threads per process
     if len(gpus) == 1 and cpus <= 0:
         m = PhysDDG(weights, stage, f"cuda:{gpus[0]}", mode)
         return pd.concat([m.predict(s, rows=r, terms=terms).assign(structure=s) for s, r in jobs], ignore_index=True)

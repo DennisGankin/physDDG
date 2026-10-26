@@ -8,11 +8,14 @@
 ddg in kcal/mol, positive = destabilising. Stage 1 (default) = fixed environment, model B4; stage 2 = flexible
 neighbours, model B5 (recommended for AlphaFold models: --mode af implies --stage 2 unless given).
 """
-import argparse
 import os
-import sys
-import time
-from pathlib import Path
+
+for _v in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ.setdefault(_v, "1")
+import argparse  # noqa: E402
+import sys  # noqa: E402
+import time  # noqa: E402
+from pathlib import Path  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -63,5 +66,4 @@ def main():
 
 
 if __name__ == "__main__":
-    os.environ.setdefault("OPENBLAS_NUM_THREADS", "4")
     main()
