@@ -3,29 +3,32 @@
 Produced by `scripts/52_ladder_physics.py --stage fit`; loaded by `physddg/predict.py` and `physddg.fit.load_model`.
 All weights are in **kcal/mol per unit of the feature** and all models follow D1 (positive = destabilising).
 
-## Which file to use (D19 release)
+## Which file to use (D22 release — the shipped models are the JOINT fits)
 | file | = | stage | inputs | use |
 |---|---|---|---|---|
-| **`final_stage2.json`** | B6g | 2 (mean-field, flexible neighbours) | crystal or AF | **default** |
-| **`final_stage1.json`** | B6gs1 | 1 (Boltzmann site, fixed env) | crystal or AF | **default fast mode** (~3.5x faster) |
-| **`final_af.json`** | B6gaf | 2 | **AF models only** (B-factor = pLDDT) | AF mode; adds pLDDT attenuation |
-| `B6g.json`, `B6gs1.json`, `B6gaf.json` | | | | same content as the `final_*` files (aliases) |
-| `B6x.json` | | 2 | any | B6g + `site_scsc`: Megascale/Domainome-tuned, worse on crystal sets. Transparency only |
-| `B5.json`, `B4.json` | | 2 / 1 | any | previous rung (no N-cap/dipole) |
-| `B4j.json`, `B5j.json` | | 1 / 2 | any | joint Megascale+FireProt fits |
+| **`final_stage2.json`** | B6gj | 2 (mean-field, flexible neighbours) | crystal or AF | **default** |
+| **`final_stage1.json`** | B6gjs1 | 1 (Boltzmann site, fixed env) | crystal or AF | **default fast mode** (~3.5x faster) |
+| **`final_af.json`** | B6gjaf | 2 | **AF models only** (B-factor = pLDDT) | AF mode; adds pLDDT attenuation |
+| `ref_stage2.json` / `ref_stage1.json` / `ref_af.json` | B6g / B6gs1 / B6gaf | 2 / 1 / 2 | any | **D19 Megascale-only** reference fits, kept for comparison |
+| `B6x.json` | | 2 | any | + `site_scsc`: Megascale/Domainome-tuned, worse on crystal sets. Transparency only |
+| `B6g-refzero.json`, `B6g-noref.json`, `B6g-floor.json` | | 2 | | Δref and loss diagnostics, not for production |
+| `B5.json`, `B4.json`, `B4j.json`, `B5j.json` | | 1 / 2 | any | earlier rungs |
 | `*+C.json` | | | | **test-informed** CXXC disulfide exception — do not use for reporting |
-| `B4-capC*`, `B4-noenv/phys/dF/odd*`, `B5-*` | | | | ablations, not for production |
+| `B4-capC*`, `B4-noenv/phys/dF/odd*`, `B5-*` | | | | ablations |
 
-B6g = B5 + `ncap_pref` + `helix_dipole` (D19: the shipped default must generalise across assays, so the two WT-site
-terms `site_scsc` and `site_hbsc_bur` from the residual analysis are not in it). The `final_*` files carry
-`alias_of`, `release` and `description` keys in addition to the normal schema.
+**D22: the shipped models are fitted jointly on Megascale-train + FireProt-train** (per-assay scale/offset,
+cluster-balanced weights, Megascale δ_ref as a nuisance). They beat the Megascale-only `ref_*` models on every
+assay except Megascale itself, where they are equal. **The nuisance block must never be applied at inference** —
+see the prediction rule below. Model form is otherwise identical to D19: B6g = B5 + `ncap_pref` + `helix_dipole`.
 
 ## Prediction rule
 ```
 ddg = intercept + Σ_k weights[k] · x_k + ref[mut] − ref[wt]          (WT→WT is exactly 0 by definition)
 ```
-`ref` is the 20 reference energies (absent/empty when the model was fitted without them). `nuisance` holds
-per-dataset scale/offset/σ and the Megascale δ_ref; **all of it is dropped at inference** (D7) — do not apply it.
+`ref` is the 20 reference energies: for a joint model this is the **assay-agnostic** prior + shared part, which
+is exactly what inference should use. The `nuisance` block (FireProt `scale`/`offset`, Megascale `delta_ref`) is
+fitted only to absorb assay idiosyncrasies and **is dropped at inference** (D7). `physddg.fit.predict` ignores it
+by construction; a loader that re-implements the sum must ignore it too.
 
 **Attenuated models** (`B6af*`, any model with a `scale_kind` key) are two-stage:
 ```
@@ -64,6 +67,8 @@ B6g feature definitions (from the WT structure, no side-chain modelling; both ar
   Weight ≈ 0.09 kcal/mol per charge. (Measurably inert in B6g: dropping it changes CV by −0.001; kept per D19.)
 B6x only: `site_scsc` = min(side-chain heavy atoms of other residues within 4.5 Å of the WT side chain, 30)/30 for
 every substitution — a WT-site main effect (not a state-function difference).
+
+**The attenuated model's `scale_base` is itself a joint model**, so the nuisance rule above applies to it too.
 
 **pLDDT for `final_af.json`:** `flag_lowplddt = 1 − pLDDT/100` only when the structure is an AF model whose
 per-structure mean B-factor is in [30, 100]; 0 for crystal structures and for design models with B = 0.

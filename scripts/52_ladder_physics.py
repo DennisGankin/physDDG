@@ -348,12 +348,13 @@ def stage_ablate():
 EVAL_CAP = "capC"          # cap variant whose columns are merged at evaluation time (selected on train/val)
 # name -> (stage, kind, joint[, attenuation]); "+C" = catalytic-CXXC exception (test-informed, D17);
 # "af" models carry the pLDDT attenuation and are only meaningful where B-factors are pLDDT (AF/AF2 models).
-ATTEN = {"B6gaf": "plddt"}
+ATTEN = {"B6gaf": "plddt", "B6gjaf": "plddt"}
 NOREF = {"B6g-noref"}            # refit without reference energies at all
 FLOOR = {"B6g-floor"}            # mut-floor rows (flag_mut_floor) treated as lower bounds (Tobit), critique I7(ii)
 MODELS = {
     "B6gs1": (1, "b6g", False), "B6g": (2, "b6g", False), "B6gaf": (2, "b6g", False),   # D19 shipped models
     "B6gj": (2, "b6g", True), "B6gjs1": (1, "b6g", True),       # multi-assay joint fits (critique #2 I1a)
+    "B6gjaf": (2, "b6g", True),                                  # D22: AF-mode variant of the joint model
     "B6g-noref": (2, "b6g", False), "B6g-floor": (2, "b6g", False),
     "B6x": (2, "b6", False),                                                          # with site_scsc (transparency)
     "B4-capC": (1, "full", False), "B4-capC-soft": (1, "full", False),
@@ -488,7 +489,7 @@ def stabilising(df, col, k=5):
 
 
 # Models fitted with FireProt-trainval: their "strict" subsets must also exclude FireProt-trainval homologues.
-JOINT_MODELS = {"B4j", "B5j", "B6j", "B6gj", "B6gjs1", "B4j+C", "B5j+C", "B6x-j", "tmol-refit", "KORPM", "DDGun3D"}
+JOINT_MODELS = {"B4j", "B5j", "B6j", "B6gj", "B6gjs1", "B6gjaf", "B4j+C", "B5j+C", "B6x-j", "tmol-refit", "KORPM", "DDGun3D"}
 MS_ONLY_STRICT = "homolog_in_megascale_train==0"
 BOTH_STRICT = "homolog_in_megascale_train==0,homolog_in_fireprot_trainval==0"
 
@@ -558,7 +559,7 @@ def _eval_task(bench, sub, model, df, n_boot, comps, rows_tag="own"):
 def stage_eval(n_boot=1000):
     models = load_models()
     comps = ["FoldX", "FoldX-clip", "B3+", "tmol-refit", "KORPM", "DDGun3D"]
-    mains = ["B4", "B5", "B6g", "B6gs1", "B6gaf", "B6x"]
+    mains = ["B5", "B6g", "B6gj", "B6gjs1", "B6gjaf", "B6gaf"]
     tasks, cov, strata_rows, stab_rows = [], [], [], []
     for bench, subs in SUBSETS.items():
         b = L.bench_table(bench)
@@ -984,7 +985,7 @@ def stage_report():
             ("s669", "strict", "pearson", "S669-strict r", True), ("s461", "strict", "pearson", "S461-strict r", True),
             ("domainome", "all", "spearman_prot_median", "Dom ρ_dom", True),
             ("abundance_dms", "all", "spearman_prot_median", "Abund ρ", False)]
-    order = ["B3+", "B4", "B5", "B6gs1", "B6g", "B6gaf", "B6gj", "B6gjs1", "B6g-refzero", "B6g-noref", "B6g-floor", "B6x",
+    order = ["B3+", "B4", "B5", "B6gs1", "B6g", "B6gaf", "B6gj", "B6gjs1", "B6gjaf", "B6g-refzero", "B6g-noref", "B6g-floor", "B6x",
              "B4-capC", "B4-capC-soft", "B4-noenv", "B4-phys", "B4-dF", "B4-odd", "B4j", "B4j+C",
              "B5-noenv", "B5-phys",
              "B5-dF", "B5-odd", "B5j", "B5j+C", "FoldX", "FoldX-clip", "tmol-refit", "KORPM", "DDGun3D"]

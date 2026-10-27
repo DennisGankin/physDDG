@@ -257,3 +257,16 @@ a float32 guard (`_float32`).
   mutate.site_candidates 0.32 s (incl. GPU builder), (5) features_simple.site_table + variant_features 0.21 s and
   rotlib.rama_energy 0.08 s (20 per-aa calls). No further easy wins without changing other owners' files
   (features_simple.site_table re-loads the structure; passing the loaded model would save ≈ 0.08 s).
+- **R-fit4 (D22: `final_*.json` changed meaning — action needed if predict.py special-cases anything).**
+  The shipped models are now the **joint** fits (Megascale-train + FireProt-train):
+  `final_stage2.json` = B6gj, `final_stage1.json` = B6gjs1, `final_af.json` = B6gjaf (AF inputs only).
+  The previous Megascale-only models are kept as `ref_stage2.json` / `ref_stage1.json` / `ref_af.json`.
+  **The feature contract and the prediction rule are unchanged** — but two things must hold:
+  1. A joint model's JSON carries a `nuisance` block with `scale`/`offset` for FireProt and a per-assay
+     `delta_ref` for Megascale. **None of it may be applied at inference.** `physddg.fit.predict` already
+     ignores `nuisance` entirely (prediction = intercept + Σ w·x + ref[mut] − ref[wt]), so a loader that calls
+     `FT.predict` is correct by construction; a loader that re-implements the sum must ignore `nuisance` too.
+     The `ref` block in the JSON is the assay-agnostic prior + shared part, which is what inference should use.
+  2. `final_af.json` is attenuated (`scale_kind: "plddt"`, embedded `scale_base`) — same two-stage rule as before
+     (R-fit3). Its `scale_base` is itself a joint model, so rule 1 applies to the nested model as well.
+  Everything else (feature names, `derive_opts`, `stage`, caps) is identical to the D19 release.
