@@ -174,7 +174,7 @@ def cxxc(prot, rows: pd.DataFrame) -> pd.Series:
 
 
 # ============================================================================= flags
-def site_flags(prot, idx: np.ndarray, mode: str = "xtal") -> tuple[list[str], list[bool]]:
+def site_flags(prot, idx: np.ndarray, mode: str = "xtal", has_plddt: bool = True) -> tuple[list[str], list[bool]]:
     """Per-site warning flags (see module docstring) and the AF-mode `withheld` indicator
     (pLDDT < 70 | terminal | exposed hydrophobic patch | metal site; always False in xtal mode)."""
     a = prot.ann
@@ -213,9 +213,11 @@ def site_flags(prot, idx: np.ndarray, mode: str = "xtal") -> tuple[list[str], li
                 f.append("terminal")
             withheld.append(False)
         else:
-            names = ("low_plddt", "very_low_plddt", "near_low_plddt", "terminal", "exposed_hydrophobic_patch", "metal_site")
+            names = ("low_plddt", "very_low_plddt", "near_low_plddt") if has_plddt else ()
+            names += ("terminal", "exposed_hydrophobic_patch", "metal_site")
             f += [n for n in names if bool(af[n][k])]
-            withheld.append(bool(af["low_plddt"][k] or af["terminal"][k] or af["exposed_hydrophobic_patch"][k]
+            low = bool(af["low_plddt"][k]) if has_plddt else False
+            withheld.append(bool(low or af["terminal"][k] or af["exposed_hydrophobic_patch"][k]
                                  or af["metal_site"][k]))
         out.append(";".join(f))
     return out, withheld
@@ -251,6 +253,64 @@ def parse_sites(spec: str | None) -> set | None:
 
 
 # ============================================================================= predictor
+_AF_NAME = re.compile(r"AF-[A-Z0-9]+-F\d+-model_v\d+", re.I)
+
+
+def plddt_available(prot) -> bool:
+    """B-factors usable as pLDDT: all in [0, 100], not constant, mean in [30, 100] (the same criterion the
+    feature code uses, features_extra.candidate_features)."""
+    b = prot.b14[prot.mask14].astype(float)
+    return bool(len(b) and b.min() >= 0 and b.max() <= 100 and np.ptp(b) > 0 and 30 <= prot.bfactor.mean() <= 100)
+
+
+def detect_structure_type(structure, prot) -> tuple[str, str]:
+    """'af' or 'xtal' for an input structure, with the reason. Order: header (EXPDTA / _exptl.method -> xtal;
+    'ALPHAFOLD' / ModelCIF pLDDT records -> af), file name (AF-<acc>-F<n>-model_v<k>), then B-factors: a predicted
+    model has one value per residue (no per-atom variation) bounded in [0, 100] with median > 50; anything else
+    (including an empty, all-equal B-factor column without other AF evidence) is treated as experimental. Declare
+    models without pLDDT explicitly (structure_type='af'): they are scored without pLDDT terms and flagged."""
+    import gzip
+    s = str(structure)
+    try:
+        op = gzip.open if s.endswith(".gz") else open
+        with op(s, "rt", errors="ignore") as fh:
+            head = "".join(fh.readline() for _ in range(80)).upper()
+    except OSError:
+        head = ""
+    if "ALPHAFOLD" in head or "_MA_QA_METRIC" in head:
+        return "af", "header: AlphaFold"
+    if re.search(r"^EXPDTA|_EXPTL\.METHOD", head, re.M):
+        return "xtal", "header: experimental method"
+    if _AF_NAME.search(Path(s).name):
+        return "af", "file name AF-*-model_v*"
+    b = prot.b14.astype(float)
+    m = prot.mask14
+    if not m.any():
+        return "xtal", "no atoms"
+    if np.ptp(b[m]) == 0:     # ambiguous (NMR / processed crystal files, designed or AF2 models without pLDDT):
+        return "xtal", "empty B-factor column, no AF evidence (pLDDT terms off either way)"
+    spread = np.array([np.ptp(b[i][m[i]]) if m[i].any() else 0.0 for i in range(len(prot))])
+    per_residue = (spread < 1e-3).mean() >= 0.99
+    if per_residue and b[m].min() >= 0 and b[m].max() <= 100 and np.median(prot.bfactor) > 50:
+        return "af", "B-factors constant per residue in [0, 100]"
+    return "xtal", "per-atom B-factors"
+
+
+def resolve_structure_type(structure_type: str | None, struct_source: str | None, mode: str, structure,
+                           prot) -> tuple[str, str]:
+    """Explicit type > label of a benchmark table (`struct_source` containing 'af') > mode default
+    ('af' in AF mode, 'xtal' otherwise) ; 'auto' runs detect_structure_type."""
+    if structure_type in ("xtal", "af"):
+        return structure_type, "given"
+    if structure_type == "auto":
+        return detect_structure_type(structure, prot)
+    if structure_type is not None:
+        raise ValueError("structure_type must be 'xtal', 'af' or 'auto'")
+    if struct_source is not None:
+        return ("af" if "af" in str(struct_source).lower() else "xtal"), "struct_source label"
+    return ("af" if mode == "af" else "xtal"), f"mode={mode}"
+
+
 def default_weights(stage: int, mode: str = "xtal") -> Path:
     """Shipped model for (stage, mode): final_*.json (D22: joint Megascale+FireProt fits B6gjs1 / B6gj / B6gjaf; their
     `nuisance` blocks are never applied, fit.predict ignores them) if present, else the B6g family. The Megascale-only
@@ -394,6 +454,7 @@ class PhysDDG:
         df = pd.concat([df, cxxc(prot, rows).rename("cxxc")], axis=1).copy()
         if struct_source is not None:
             df = df.assign(struct_source=struct_source)
+        df = df.assign(structure_type=getattr(self, "_stype", "xtal"))
         # B6 terms (features_extra), as 52.add_extra: x_-prefixed site descriptors + candidate_features
         ex = site_tab.get("extra")
         if ex is None:                               # reuse the loaded model unless it is a trimmed/cropped copy
@@ -426,7 +487,11 @@ class PhysDDG:
         d = derive(df, self.stage, self.opts, self.caps)
         if self.scale_kind:
             col = f"scale_{self.scale_kind}"
-            d[col] = FT.predict(self.model["scale_base"], d) * self._atten(d)
+            att = self._atten(d)
+            if self.scale_kind == "plddt" and not (getattr(self, "_stype", "xtal") == "af"
+                                                   and getattr(self, "_has_plddt", False)):
+                att = np.zeros(len(d))               # crystal input or AF model without pLDDT: never attenuated
+            d[col] = FT.predict(self.model["scale_base"], d) * att
         pred = FT.predict(self.model, d)
         out = pd.DataFrame({"ddg": pred}, index=df.index)
         same = (df.wt == df.mut).to_numpy()
@@ -445,13 +510,14 @@ class PhysDDG:
         from . import afmode
         base_file = _as_pdb(structure, tmp)
         p1, f1 = prot, Path(structure)
+        trim = self.trim and self._has_plddt          # trimming needs pLDDT
         if crop:
             keep = crop_mask(prot, crop)
             p1 = afmode.trim_protein(prot, keep, preserve_dihedrals=False)   # = a construct file of that range
             p1.ann.pop("nterm_orig", None)           # construct boundaries are real termini (as in the assay)
             f1 = tmp / "crop.pdb"
             afmode.write_trimmed_pdb(base_file, set(p1.keys), f1)
-        if not self.trim:
+        if not trim:
             return p1, f1, None, None
         keep2 = afmode.trim_mask(p1, afmode.TrimConfig(**AF_TRIM))
         if keep2.all():
@@ -466,11 +532,14 @@ class PhysDDG:
     # ------------------------------------------------------------------ public API
     def predict(self, structure: str | Path, mutations=None, chain: str | None = None, scan_all: bool = False,
                 sites: str | None = None, terms: bool = False, prot=None, rows: pd.DataFrame | None = None,
-                site_tab=None, crop: str | None = None, struct_source: str | None = None) -> pd.DataFrame:
+                site_tab=None, crop: str | None = None, struct_source: str | None = None,
+                structure_type: str | None = None) -> pd.DataFrame:
         """ddG for mutations ('A12G', ...) or a saturation scan (scan_all, optional sites '10-80').
         crop (AF mode): keep only these residues ('A:10-120') before anything else (assayed construct / domain).
-        struct_source: overrides the structure-type label used by the pLDDT attenuation (default: 'af' in AF mode,
-        'xtal' otherwise; only labels containing 'af' enable it)."""
+        structure_type: 'xtal' | 'af' | 'auto' (default: 'af' in AF mode, 'xtal' otherwise; see
+        resolve_structure_type). pLDDT terms (attenuation, pLDDT flags, trimming) are used only for 'af' inputs whose
+        B-factors are pLDDT; an AF model without pLDDT is scored without them and flagged `plddt_missing`.
+        struct_source: benchmark-table label (reproduction of stored predictions); implies the type if not given."""
         import tempfile
         t0 = time.time()
         prot = prot if prot is not None else self.load(structure, chain)
@@ -487,10 +556,12 @@ class PhysDDG:
                 rows["protein_id"] = Path(str(structure)).stem
             if "mutation" not in rows:
                 rows["mutation"] = rows.wt + rows.pdb_resnum + rows.mut
-        src = struct_source or ("af" if self.mode == "af" else "xtal")
+        self._stype, self._stype_reason = resolve_structure_type(structure_type, struct_source, self.mode, structure, prot)
+        self._has_plddt = self._stype == "af" and plddt_available(prot)
+        src = struct_source or self._stype
         trimmed_site = pd.Series(False, index=rows.index)
         with tempfile.TemporaryDirectory() as tmpd:
-            if self.mode == "af" and (crop or self.trim):
+            if self.mode == "af" and (crop or (self.trim and self._has_plddt)):
                 p1, f1, p2, f2 = self._af_models(str(structure), prot, crop, Path(tmpd))
                 rows_feat = rows.assign(structure=str(f1))
                 if p2 is not None:
@@ -510,6 +581,9 @@ class PhysDDG:
             else:
                 out = self._run(prot, str(structure), rows, site_tab, src, terms)
         out = out.drop(columns=["structure"], errors="ignore")
+        out["structure_type"] = self._stype
+        if self._stype == "af" and not self._has_plddt:
+            out["flags"] = (out["flags"] + ";plddt_missing").str.strip(";")
         if self.mode == "af":
             out.loc[trimmed_site.to_numpy(), "flags"] = (out.loc[trimmed_site.to_numpy(), "flags"] + ";site_trimmed").str.strip(";")
         self.timing.update(load_s=t1 - t0, total_s=time.time() - t0, n_variants=len(out))
@@ -522,7 +596,7 @@ class PhysDDG:
         out["ddg"] = sc["ddg"]
         out["site_found"] = df["site_found"].astype(bool)
         out["wt_match"] = df["wt_match"].astype(bool)
-        fl, wh = site_flags(prot, self._idx, self.mode) if len(self._idx) else ([], [])
+        fl, wh = site_flags(prot, self._idx, self.mode, self._has_plddt) if len(self._idx) else ([], [])
         fl, wh = dict(zip(self._idx.tolist(), fl)), dict(zip(self._idx.tolist(), wh))
         ix = [self._key.get((c, r), -1) for c, r in zip(rows.chain, rows.pdb_resnum)]
         out["flags"] = [("" if i < 0 else fl.get(i, "")) + ("" if wm else (";wt_mismatch" if i >= 0 else ";site_not_found"))
@@ -558,7 +632,7 @@ def _prep(job):
     return structure, rows, prot, tab, None, time.time() - t
 
 
-def _gpu_worker(gpu: int, jobs: list, weights, stage, mode, cpus: int, terms: bool, q):
+def _gpu_worker(gpu: int, jobs: list, weights, stage, mode, cpus: int, terms: bool, q, structure_type=None):
     import os
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu)
     from concurrent.futures import ProcessPoolExecutor
@@ -571,7 +645,7 @@ def _gpu_worker(gpu: int, jobs: list, weights, stage, mode, cpus: int, terms: bo
                     if prot is None:
                         raise RuntimeError(f"load_failed:{err}")
                     o = m.predict(structure, rows=rows, prot=prot, site_tab=None if m.mode == "af" else tab,
-                                  terms=terms)
+                                  terms=terms, structure_type=structure_type)
                     o["gpu"], o["cpu_prep_s"], o["gpu_s"] = gpu, t_cpu, m.timing["engine_s"]
                 except Exception as e:  # noqa: BLE001  (never lose the other structures)
                     o = rows.drop(columns=[c for c in ("structure",) if c in rows]).assign(
@@ -583,7 +657,7 @@ def _gpu_worker(gpu: int, jobs: list, weights, stage, mode, cpus: int, terms: bo
 
 
 def run_jobs(jobs: list, gpus=(0,), weights=None, stage: int | None = None, mode: str = "xtal", cpus: int = 4,
-             terms: bool = False) -> pd.DataFrame:
+             terms: bool = False, structure_type: str | None = None) -> pd.DataFrame:
     """jobs: list of (structure, rows DataFrame with chain/pdb_resnum/wt/mut[/mutation/protein_id/...]).
     One process per GPU (greedy balance by number of distinct sites), CPU preparation in a pool per GPU process."""
     import multiprocessing as mp
@@ -592,7 +666,8 @@ def run_jobs(jobs: list, gpus=(0,), weights=None, stage: int | None = None, mode
         os.environ.setdefault(v, "1")                                           # avoid 64 BLAS threads per process
     if len(gpus) == 1 and cpus <= 0:
         m = PhysDDG(weights, stage, f"cuda:{gpus[0]}", mode)
-        return pd.concat([m.predict(s, rows=r, terms=terms).assign(structure=s) for s, r in jobs], ignore_index=True)
+        return pd.concat([m.predict(s, rows=r, terms=terms, structure_type=structure_type).assign(structure=s)
+                          for s, r in jobs], ignore_index=True)
     size = [r[["chain", "pdb_resnum"]].drop_duplicates().shape[0] for _, r in jobs]
     parts, load = [[] for _ in gpus], [0] * len(gpus)
     for j in np.argsort(size)[::-1]:
@@ -601,7 +676,7 @@ def run_jobs(jobs: list, gpus=(0,), weights=None, stage: int | None = None, mode
         load[k] += size[j]
     ctx = mp.get_context("spawn")
     q = ctx.Queue()
-    procs = [ctx.Process(target=_gpu_worker, args=(g, pj, weights, stage, mode, cpus, terms, q))
+    procs = [ctx.Process(target=_gpu_worker, args=(g, pj, weights, stage, mode, cpus, terms, q, structure_type))
              for g, pj in zip(gpus, parts) if pj]
     for pr in procs:
         pr.start()

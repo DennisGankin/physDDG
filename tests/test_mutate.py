@@ -266,3 +266,62 @@ def test_af_crop_equals_construct_file():
     b = m.predict(g.af_full_structure.iloc[0], [f"{w}{r}{u}" for w, r, u in zip(g.wt, g.af_full_resnum.astype(int), g.mut)],
                   crop=f"A:{fr.min()}-{fr.max()}")
     assert b.wt_match.all() and np.allclose(a.ddg.to_numpy(), b.ddg.to_numpy(), atol=1e-6)
+
+
+# ----------------------------------------------------------------------------- structure type (audit 2, I4 / D23)
+XTAL_RAW = Path("/workspace/data/fireprot_pdbs/1A23.pdb")                       # crystal/NMR with PDB header
+XTAL_HIGH_B = Path("data/structures/xtal/fireprot/1JNX_X.pdb")                  # headerless crystal, mean B 30-100
+AF_MODEL = Path("/workspace/data/yeast_af/pdbs/P20486.pdb")                     # AlphaFold DB model (pLDDT)
+MS_NO_PLDDT = Path("/workspace/data/megascale_pdbs/EEHEE_rd2_0391.pdb")         # Megascale model, empty B column
+
+
+def _need(*paths):
+    for p in paths:
+        if not Path(p).exists():
+            pytest.skip(f"{p} not available")
+
+
+def test_detect_structure_type():
+    from physddg.predict import detect_structure_type, plddt_available
+    _need(XTAL_RAW, XTAL_HIGH_B, AF_MODEL, MS_NO_PLDDT)
+    for f, want in ((XTAL_RAW, "xtal"), (XTAL_HIGH_B, "xtal"), (AF_MODEL, "af"), (MS_NO_PLDDT, "xtal")):
+        p = load_protein(f)
+        assert detect_structure_type(f, p)[0] == want, f
+    assert plddt_available(load_protein(AF_MODEL)) and not plddt_available(load_protein(MS_NO_PLDDT))
+
+
+def test_crystal_never_attenuated_any_path():
+    """A crystal whose mean B-factor lies in 30-100 (the case the old B-factor fallback called an AF model) gets no
+    pLDDT attenuation with AF weights: in xtal mode, with structure_type='auto', and through features() called
+    directly without any label."""
+    from physddg.predict import MODELS, PhysDDG
+    _need(XTAL_HIGH_B, MODELS / "final_af.json")
+    p = load_protein(XTAL_HIGH_B)
+    assert 30 <= p.bfactor.mean() <= 100 and p.b14[p.mask14].max() <= 100
+    muts = [f"{a}{r}A" for a, r in zip(p.seq[20:26], p.resnum[20:26]) if a != "A"]
+    for kw in ({"mode": "xtal"}, {"mode": "af"}):
+        m = PhysDDG(MODELS / "final_af.json", device=DEV, **kw)
+        o = m.predict(XTAL_HIGH_B, muts, terms=True, structure_type="auto" if kw["mode"] == "af" else None)
+        assert (o["c_scale_plddt"] == 0).all() and (o["structure_type"] == "xtal").all()
+        assert not o["flags"].str.contains("plddt").any()
+    m = PhysDDG(MODELS / "final_af.json", device=DEV)
+    prot = m.load(XTAL_HIGH_B)
+    rows = m._rows(prot, str(XTAL_HIGH_B), muts, None, False, None)
+    df = m.features(prot, str(XTAL_HIGH_B), rows)                 # building block, no label
+    assert (df["flag_lowplddt"] == 0).all()
+
+
+def test_af_model_attenuated_and_model_without_plddt_flagged():
+    from physddg.predict import MODELS, PhysDDG
+    _need(AF_MODEL, MS_NO_PLDDT, MODELS / "final_af.json")
+    m = PhysDDG(MODELS / "final_af.json", device=DEV, mode="af", trim=False)
+    p = load_protein(AF_MODEL)
+    low = [i for i in range(len(p)) if p.bfactor[i] < 70 and p.seq[i] != "A"][:3]
+    o = m.predict(AF_MODEL, [f"{p.seq[i]}{p.resnum[i]}A" for i in low], terms=True, structure_type="auto")
+    assert (o["structure_type"] == "af").all() and (o["c_scale_plddt"] != 0).any()
+    q = load_protein(MS_NO_PLDDT)
+    muts = [f"{q.seq[i]}{q.resnum[i]}A" for i in range(5, 10) if q.seq[i] != "A"]
+    for kw in ({"structure_type": "af"}, {"struct_source": "af2_model_tsuboyama"}):
+        o = m.predict(MS_NO_PLDDT, muts, terms=True, **kw)
+        assert (o["c_scale_plddt"] == 0).all() and o["flags"].str.contains("plddt_missing").all()
+        assert not o["flags"].str.contains("low_plddt").any()

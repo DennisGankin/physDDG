@@ -611,9 +611,19 @@ def candidate_features(d: pd.DataFrame) -> pd.DataFrame:
     nonc = (wt != mut).astype(float)
     # pLDDT: design models (and crystal structures) carry no pLDDT; treat B-factor columns of non-AF models as "no
     # information" (pLDDT 100) so that the low-pLDDT terms are not a designed-protein indicator
-    is_af = d["x_mean_plddt"].astype(float).between(30, 100) & (d["x_plddt"].astype(float).max() <= 100)
-    if "struct_source" in d:
-        is_af &= d["struct_source"].astype(str).str.contains("af", case=False) | d["struct_source"].isna()
+    # Which rows are AlphaFold models with usable pLDDT (audit 2, I4 / D23). The structure type must be given
+    # explicitly: column `structure_type` ('af' | 'xtal', from physddg.predict.resolve_structure_type), else the
+    # table's `struct_source` label (contains 'af' -> AF model). There is NO B-factor-only fallback any more: it
+    # classified crystals with mean B in 30-100 as AF models. pLDDT must also look like pLDDT (mean in 30..100,
+    # max <= 100); AF models with an empty B-factor column get no pLDDT terms (predict flags them plddt_missing).
+    plddt_like = d["x_mean_plddt"].astype(float).between(30, 100) & (d["x_plddt"].astype(float).max() <= 100)
+    if "structure_type" in d:
+        typed = d["structure_type"].astype(str).str.lower().eq("af")
+    elif "struct_source" in d:
+        typed = d["struct_source"].astype(str).str.contains("af", case=False) & d["struct_source"].notna()
+    else:
+        typed = pd.Series(False, index=d.index)
+    is_af = plddt_like & typed
     plddt = d["x_plddt"].astype(float).where(is_af & (d["x_mean_plddt"] > 0), 100.0)
     o["site_ncb14"] = d["x_ncb14"].astype(float) / 40.0 * nonc
     o["site_hse_up"] = d["x_hse_up"].astype(float) / 30.0 * nonc
