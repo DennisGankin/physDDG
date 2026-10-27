@@ -1,0 +1,775 @@
+%% Supplementary material for the PhysDDG manuscript.
+%% Generated from supplementary.md (the markdown twin); keep the two in step.
+%% Compile with: tools/tectonic -X compile supplementary.tex
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{amsmath}
+\usepackage{longtable}
+\usepackage[hidelinks]{hyperref}
+\usepackage{parskip}
+\renewcommand{\arraystretch}{1.1}
+\setcounter{secnumdepth}{0}
+\title{Supplementary: methods that were tried and did not work\\[2mm]
+\large PhysDDG: a GPU physics engine with a linear read-out for protein stability changes}
+\author{<AUTHOR PLACEHOLDER>}
+\date{}
+\begin{document}
+\maketitle
+\sloppy
+
+
+Supplement to "PhysDDG: a GPU physics engine with a linear read-out for protein stability changes".
+
+Every number here comes from the project's own result tables (\texttt{results/ladder\_physics/},
+\texttt{results/af\_mode/}, \texttt{results/enm\_flexibility/}, \texttt{results/diff\_params/}, \texttt{results/evo\_extension/}) and from the
+notes that describe them. Confidence intervals are 95\% percentile intervals from a bootstrap that resamples
+homology clusters. Comparisons are paired on identical rows. "Val" means the Megascale validation split and
+"CV" means grouped five-fold cross-validation over homology clusters on the training split; those are the
+numbers that no test set influenced.
+
+Shorthand for the models: \textbf{base Stage 1} and \textbf{base Stage 2} are the fitted engine models without the two
+late terms; \textbf{default} is the shipped Stage-2 model; \textbf{joint} is the variant fitted on Megascale and FireProt
+together. The Megascale primary subset is the 21 natural test proteins (22,159 variants).
+
+
+
+\section{S1. Reweighting the 22 FoldX energy terms}
+
+\textbf{Hypothesis and source.} FoldX publishes its 22 per-term energies for every prediction
+(Guerois 2002; Schymkowitz 2005). If its weights, fitted to about a thousand measurements in 2002, are the
+limitation, refitting them on 215,731 Megascale rows should help.
+
+\textbf{What was done.} Free linear weights on the 22 FoldX terms, fitted under protein-grouped five-fold
+cross-validation on Megascale-train, with and without log compression of the clash terms.
+
+\textbf{Numbers.} Pooled Spearman on Megascale-test: stock FoldX 0.569; refitted 0.541; refitted with
+log-compressed clash terms 0.567 (per-protein 0.633 / 0.604 / 0.628). Seven of the 22 terms are identically
+zero on monomeric single mutants (loop entropies, water bridge, disulfide, electrostatic kon, partial covalent,
+complex entropy) and three more have $|$rho$|$ <= 0.02 (cis-bond, ionisation, helix dipole).
+
+\textbf{Why we think it failed.} The missing accuracy is in the terms and in the sampling, not in the weights.
+Refitting more parameters on a different assay than the one that FoldX was tuned on loses more than it gains.
+
+\textbf{Decision.} Do not build on FoldX terms; build the engine, and keep the term count near 20.
+
+
+
+\section{S2. Hard cap versus soft repulsion, and site-dependent caps}
+
+\textbf{Hypothesis and source.} A fixed backbone over-penalises small-to-large substitutions, and the repulsion term
+is both the heavy tail and the antisymmetry defect. The design critique proposed a site-dependent cap
+\texttt{cap = c0 + c1 * flex(site)} (decision D9), with flexibility from the smoothed contact number.
+
+\textbf{What was done.} Three cap settings (capA \texttt{c0=1}; capB \texttt{c0=3}, the original; capC \texttt{c0=1, c1=2} rising with
+burial), each with an additional log-softened repulsion column, with all features recomputed. Selection on
+Megascale-val plus grouped CV only.
+
+\textbf{Numbers.} Val natural per-protein rho: capA hard 0.7276, capB hard 0.7265, capC hard 0.7291 (selected),
+soft variants 0.7190--0.7201. CV: 0.6672--0.6715. The spread over all six settings is 0.010 on validation and
+0.004 in CV, inside the CV standard error of 0.0064. On test, refitting with the winner moves the Stage-1 model
+from 0.677 to 0.678. The soft column halves the heavy tail (99th percentile of the repulsion feature 123 to 53
+kcal/mol) at a cost of about 0.007 validation rho. On the antisymmetry diagnostic the unit-weight repulsion bias
+is +7.5 kcal/mol (capB), +4.2 (capA) and +3.2 (soft column); the correlation between direct and negated reverse
+stays at 0.29--0.35.
+
+\textbf{Why we think it failed.} The cap controls the size of the tail, not its cause. Each structure is packed
+around the residue that it contains, so both directions of a substitution clash, and the fixed backbone is the cause.
+
+\textbf{Decision.} Keep capC on physical grounds and state that the choice does not matter. The signed-log transform
+of the repulsion feature stays, selected on validation.
+
+
+
+\section{S3. Single-structure symmetrisation and antisymmetry fixes}
+
+\textbf{Hypothesis and source.} A physics model should obtain antisymmetry for free (Pucci 2018). Three fixes were
+tried.
+
+\textbf{What was done and the numbers.}
+
+\begin{center}\scriptsize
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.409\linewidth}>{\raggedright\arraybackslash}p{0.153\linewidth}>{\raggedright\arraybackslash}p{0.062\linewidth}>{\raggedright\arraybackslash}p{0.277\linewidth}@{}}
+\toprule
+fix & correlation(direct, $-$reverse) & bias (kcal/mol) & cost \\
+\midrule
+none (default model) & 0.25 & +1.37 & --- \\
+symmetric residue-pair offsets S(a,b) fitted inside the reference energies & 0.59 vs 0.587 without, i.e. no change & +0.50 & none, and no benefit \\
+drop every wild-type-site-only main effect ("odd" model) & 0.57--0.59 & +0.38--0.44 & $-$0.044 Megascale per-protein rho \\
+two-structure symmetrisation $\tfrac{1}{2}$[pred(direct) $-$ pred(reverse on the mutant crystal)] & $-$1 by construction & 0 & direct Pearson 0.70 to 0.60, and needs the mutant crystal structure \\
+single-structure symmetrisation: score the reverse on the modelled mutant environment (\texttt{sym\_s2\_dF}) & 0.15 & +3.5 (unfitted) & Megascale-val raw rho 0.558 to 0.540 \\
+\bottomrule
+\end{tabular}\end{center}
+
+Per term, every engine energy is already nearly antisymmetric across the two structures (correlation 0.90--0.98,
+mean direct + reverse $\pm$0.1--0.3 kcal/mol). The exception is repulsion: mean direct + reverse +7.5 (Stage 1) /
++5.9 (Stage 2) kcal/mol, correlation 0.29.
+
+\textbf{Why we think it failed.} The modelled mutant environment stays close to the wild-type crystal environment,
+because the backbone is fixed and the neighbours move little, while the real mutant crystal is repacked. A
+single structure therefore cannot deliver cross-structure antisymmetry in a fixed-backbone model.
+
+\textbf{Decision.} Report the default model as not antisymmetric, offer the "odd" variant where antisymmetry
+matters, and treat Ssym as a diagnostic only (96.5\% of its rows have a FireProt training homologue).
+
+
+
+\section{S4. Backbone ensembles (gate G3)}
+
+\textbf{Hypothesis and source.} Backbone give is the physically correct fix for over-penalised small-to-large
+substitutions; ensemble averaging helps FoldX and is the whole advantage of Rosetta flex-ddG (Barlow 2018).
+
+\textbf{What was done.} Native plus eight perturbed backbones per structure; each residue displaced by a smooth
+Gaussian-process field (RBF length 6 \AA{}) at 0.3 \AA{} or 0.6 \AA{} RMS amplitude; torsions and rotamer candidates kept
+from the native structure; aggregation by mean and by Boltzmann weight over backbones. Megascale validation
+only, 17,908 natural rows, Stage-1 features, weights not refitted.
+
+\textbf{Numbers.} Per-protein rho: native 0.7265; 0.3 \AA{} mean 0.7257; 0.3 \AA{} Boltzmann 0.7253; 0.6 \AA{} mean 0.7233;
+0.6 \AA{} Boltzmann 0.7188. Buried small-to-large (1,402 rows): 0.349 native, at most 0.358 with an ensemble,
+against a gate of +0.015. Cost: nine times Stage 1.
+
+\textbf{Why we think it failed.} Random displacements do not find the relaxation that matters. The relevant motion is
+a directed accommodation of the new side chain, which needs a minimiser rather than noise.
+
+\textbf{Decision.} Dropped. A directed local relaxation remains the untested option and is the first thing we would
+try next.
+
+
+
+\section{S5. Neighbour repacking overall (gate G2)}
+
+\textbf{Hypothesis.} Letting the neighbours move should matter wherever the mutation changes the packing.
+
+\textbf{What was done.} Stage 2 as described in the main text, compared with Stage 1 on identical rows and, after
+audit 1 objected to a test-based stratum claim, re-done on out-of-fold predictions on the training split and on
+validation.
+
+\textbf{Numbers.} Overall gain: +0.004 (CV out of fold), +0.005 (validation), +0.010 on test, against a
+pre-registered gate of +0.02. On buried small-to-large substitutions (8--9\% of rows): +0.034 pooled and +0.058
+per-protein out of fold, in 5 of 5 folds, and +0.068 / +0.078 on validation, which clears the +0.03 gate for
+that stratum. Runtime: about 550 mutations/s/GPU against 1,900 for Stage 1. A diagnostic worth noting: the
+mean-field packer returns the neighbour's native rotamer as its most probable state in only about half of the
+wild-type cases, partly because the native rotamer and its library twin split the probability.
+
+\textbf{Decision.} Gate failed overall, passed on its target stratum. Stage 2 is the default for crystal input
+because it is affordable there, Stage 1 is the default for proteome-scale scans, and the honest statement is
+that repacking buys accuracy in one stratum rather than everywhere.
+
+
+
+\section{S6. Elastic-network flexibility as a dynamics term}
+
+\textbf{Hypothesis and source.} 43\% of the residual variance is at the site level and no descriptor in the model
+describes site dynamics. Gaussian and anisotropic network models give site flexibility for free
+(Bahar 1997; Atilgan 2001).
+
+\textbf{What was done.} Eleven descriptors (GNM mean-square fluctuation, ANM, centroid-node ANM, Eyal--Bahar spring
+constants, perturbation-response scanning, dynamic flexibility index, hinge score, contact degree, a
+pLDDT-weighted GNM), three normalisations and eight functional forms, so 264 configurations per stage, with a
+pre-registered primary candidate (GNM fluctuation multiplying the engine energy) and a pre-registered bar
+(+0.004 on validation and in CV with at least 4 of 5 folds up).
+
+\textbf{Numbers.} The primary candidate is rejected: validation $-$0.005, 1 of 5 folds up at Stage 2. The best of the
+264 (centroid ANM fluctuation rank scaling the whole prediction, weight $-$0.56) passes the bar: validation
++0.005 / +0.011, CV +0.012 / +0.014, and on the single test look Domainome +0.012 [+0.009, +0.023] and
+Megascale natural-strict +0.015 [$-$0.000, +0.038]. But a static control, the contact-number rank in the same
+form, recovers about 75\% of it (validation +0.003, CV +0.009), and adding the dynamic descriptor on top of the
+static control is worth +0.002 / +0.003. Every elastic-network descriptor correlates $-$0.85 to $-$0.91 with the
+contact number. On the site-level residuals the dynamic descriptors add at most 0.004 R$^2$ over the static set.
+The term also costs buried small-to-large (0.487 to 0.469), from-Gly (0.645 to 0.615) and antisymmetry (0.265
+to 0.162), and it calls the buried-but-tolerant SH3 positions rigid, so it makes exactly the sites that it was meant
+to fix slightly worse.
+
+\textbf{Decision.} Not adopted (D21). It is a packing-dependent scale on the prediction, not dynamics, and it is
+chosen from 264 configurations; the honest version is the contact-number control.
+
+
+
+\section{S7. Fitting the 32 physical parameters end to end}
+
+\textbf{Hypothesis and source.} Every physical constant is a frozen literature value. Rosetta-style refits of the
+energy parameters themselves usually buy accuracy (Park 2016; Alford 2017).
+
+\textbf{What was done.} 32 multiplicative log-scale parameters (14 EEF1 solvation strengths, the EEF1 correlation
+length, four radii, four well depths, four term weights inside the packing energy, the Debye length, the
+ensemble temperature, the rotamer-prior weight, the repulsive-radius scale and the repulsion cap), fitted
+through the differentiable Stage-1 scan with the Boltzmann average included, using variable projection: for
+every parameter vector the full linear model is solved to optimality and the gradient is the envelope-theorem
+gradient, checked against finite differences to better than 0.5\%. Trained on a site-balanced subsample of
+Megascale-train (14,340 rows); the penalty and stopping iteration chosen by grouped CV plus validation.
+
+\textbf{Numbers.} Training loss falls 1.9\%. Validation per-protein rho 0.7262 to 0.7260 (flat); CV natural
+per-protein +0.0055 but in only 3 of 5 folds; pre-set bar (+0.01 on validation and 4 of 5 folds) not met. On the
+single test look: Megascale natural +0.005 [$-$0.007, +0.016] rank, Domainome $-$0.001, FireProt +0.011
+[$-$0.037, +0.048] Pearson; the only consistent signal is calibration (Megascale Pearson +0.005
+[+0.002, +0.009], and positive on every set).
+
+\textbf{What it tells us anyway.} Every fitted parameter stays within a factor of 1.6 of its literature value, none
+hits its bound, and a Megascale-only and a FireProt-only fit agree at r = 0.80 over the 32 parameters. Both fits
+say the same thing: polar radii $\times$0.77, polar well depth $\times$0.74, backbone-nitrogen desolvation $\times$0.62, carboxyl and
+backbone-oxygen desolvation $\times$1.2--1.3. The literature physics is already close to a local optimum for this task.
+
+\textbf{Decision.} Nothing shipped; reported as a negative result with a transferable but small calibration gain.
+
+
+
+\section{S8. Floor-aware loss}
+
+\textbf{Hypothesis and source.} The second critique noted that 4,010 training rows (1.8\%) sit at the per-domain
+measurement floor and carry 6.6\% of the squared error; treating them as lower bounds should remove a bias.
+
+\textbf{What was done.} Refit the default model with those rows as Tobit lower bounds, using the same interval
+machinery already applied to the 11,363 excluded rows.
+
+\textbf{Numbers.} Validation natural per-protein rho 0.7411 to 0.7412; grouped CV 0.6813 to 0.6718; no weight moves
+by more than 3.8\%, against the critique's own diagnostic of 20\%.
+
+\textbf{Decision.} Not adopted. The fit is not floor-biased, and censoring those rows discards real information.
+The separate, successful use of censoring (the 11,363 rows that the assay excluded) stays in every fit.
+
+
+
+\section{S9. Pairwise and double-mutant terms}
+
+\textbf{Hypothesis.} Explicit coupling terms could capture non-additivity, and Megascale contains 127,476 double
+mutants whose two singles are also measured, so the non-additivity epsilon = ddG(AB) $-$ ddG(A) $-$ ddG(B) is
+measurable without any model.
+
+\textbf{Numbers.} Raw, non-additivity looks enormous and distance-independent: mean epsilon $-$0.88 kcal/mol, $|$epsilon$|$
+> 0.5 for 64\% of doubles, and the mean is as negative beyond 15 \AA{} ($-$0.76) as below 5 \AA{} ($-$0.78). That is the assay
+floor, not coupling. Restricting to doubles that cannot be floor-limited (sum of singles < 1.5 kcal/mol,
+28,123 rows) leaves mean epsilon $-$0.225 with sd 0.50 and $|$epsilon$|$ > 0.5 in 31\%, and the distance trend is not
+monotone: the contact bin below 5 \AA{} has the \emph{smallest} mean ($-$0.093) and the 6.5--8 \AA{} shell the largest ($-$0.321).
+
+\textbf{Decision.} No pairwise term. The upper bound on what one could buy is about 0.5 kcal/mol rms on doubles and
+nothing identifiable on singles, which is what every benchmark scores. A double-mutant scan entry point in the
+engine is specified but not built; that would be a capability argument, not an accuracy one.
+
+
+
+\section{S10. The two site terms that failed transfer (gate G6)}
+
+\textbf{Hypothesis.} The residual analysis found that per-site sensitivity is where the error is, and proposed two
+wild-type-site descriptors: side-chain contact number at the site (\texttt{site\_scsc}) and the number of buried
+side-chain hydrogen-bond partners (\texttt{site\_hbsc\_bur}).
+
+\textbf{Numbers.} Both help on Megascale: validation 0.7329 to 0.7438 (\texttt{site\_scsc}) and CV 0.6727 to 0.6845
+(\texttt{site\_hbsc\_bur}). Transfer test (weights fitted on Megascale only against FireProt only, ratio scaled by the
+1.7 assay-scale factor): \texttt{site\_hbsc\_bur} 0.25 --- fails the three-fold rule, and is undetermined on FireProt
+(0.039 $\pm$ 0.047). \texttt{site\_scsc} 0.35, at the edge of the rule. On the crystal benchmarks \texttt{site\_scsc} costs FireProt
+0.464 to 0.439 Pearson, S669-strict 0.316 to 0.291 and S461-strict 0.549 to 0.545, while adding +0.009 on
+Megascale and +0.019 on Domainome. It also pulls the burial weight down from 0.932 to 0.536, i.e. it takes over
+part of the burial main effect.
+
+\textbf{Decision.} Both dropped from the shipped model (D19). The model with \texttt{site\_scsc} is kept in the tables for
+transparency. This decision used FireProt and S669 test numbers and is one of the five test-informed decisions
+disclosed in S16.
+
+
+
+\section{S11. The disulfide term, eight rows, and the catalytic-CXXC exception}
+
+This is the clearest failure in the project and it took two audits to resolve.
+
+\textbf{What happened.} Megascale contains no disulfide-breaking mutations, so a \texttt{ss\_broken} indicator can only be
+fitted on FireProt, where it rests on about 8 training rows. It came out at +3.34 $\pm$ 1.04 kcal/mol, which is a
+sane penalty for a structural disulfide and badly wrong for a catalytic one. Thioredoxin 2TRX C32A and C35A
+(the redox-active CGPC motif) are measured at $-$4.17 and $-$4.00 kcal/mol --- breaking that disulfide \emph{stabilises}
+the protein --- and the joint model predicted +4.31 and +3.81.
+
+\textbf{The first wrong fix.} A CXXC exception was added that switched the term off for catalytic motifs. Audit 1
+found that this rule had been derived from the two FireProt \emph{test} rows it fixes: with the exception the joint
+model scores Pearson 0.479--0.484 on FireProt-test, without it 0.389--0.396. The exception was removed from the
+headline.
+
+\textbf{The second wrong fix.} The reporting script then evaluated FireProt on the rows that every predictor covers,
+which is 338 of 347 --- and the two rows missing from one baseline were exactly the 2TRX pair. Audit 2 found this.
+On the honest row set the joint model's FireProt Pearson is 0.388, not 0.482: below the Megascale-only models
+(0.451--0.456) and below clipped FoldX (0.417). The whole FireProt advantage of the joint fits was those two
+dropped rows.
+
+\begin{center}\scriptsize
+\begin{tabular}{@{}llllll@{}}
+\toprule
+FireProt-test row set & n & joint & default & base Stage 2 & FoldX-clip \\
+\midrule
+as previously reported & 338 & 0.482 & 0.464 & 0.467 & 0.423 \\
+our models + FoldX & 341 & 0.388 & 0.453 & 0.458 & 0.417 \\
+all rows & 347 & 0.388 & 0.451 & 0.456 & 0.417 \\
+all rows, whole 2TRX protein removed & 328 & 0.462 & 0.442 & 0.445 & 0.406 \\
+\bottomrule
+\end{tabular}\end{center}
+
+\textbf{The fix that stands.} The \texttt{ss\_broken} term is dropped from the joint fits by the same transfer rule that had
+already removed \texttt{site\_hbsc\_bur}, decided on validation, CV and transfer only (\texttt{ss\_decision.csv}: dropping it
+changes validation 0.7285 to 0.7297 and CV 0.6607 to 0.6631). FireProt is now reported on all 347 rows in every
+table, and any comparison that omits rows says so.
+
+\textbf{Lesson.} A term fitted on eight rows needs a scope, and the scope must come from training data or from the
+literature. An "identical rows" rule that intersects predictor coverage can silently undo a correction.
+
+
+
+\section{S12. AlphaFold treatments that did not ship}
+
+\textbf{pLDDT shrinkage.} A two-parameter logistic in pLDDT multiplying the prediction gains +0.006 to +0.022
+per-domain rho on Domainome, which passes the literal gate for one of the four predictors tested. The
+burial-matched control --- the identical logistic in 100$\cdot$(1 $-$ RSA), fitted on the same held-in data --- gains
++0.014 to +0.073, i.e. up to three times as much. The treatment is a burial-dependent calibration that carries a
+pLDDT label; on Domainome, pLDDT is largely a burial label, because low-pLDDT sites are almost all exposed.
+\emph{Decision:} not shipped as an AlphaFold correction (D8). A later, different version of this term survived a
+re-run of the same control inside a model that already contains burial and burial-weighted terms (there the
+sign-constrained burial control is pinned at zero, and refitting it without the sign constraint gives +0.82,
+which amplifies buried predictions instead of attenuating them), and it ships for AlphaFold inputs only with its weight interval including zero ($-$0.97, bootstrap
+interval $-$2.52 to $-$0.23 over 200 draws, and the model-level gain +0.012 [+0.006, +0.019] on Domainome).
+
+\textbf{pLDDT-modulated repulsion cap.} Exactly 0.000 on Domainome. A uniformly softer cap is harmful: $-$0.004 for
+the fitted model and $-$0.028 for the reference physics model.
+
+\textbf{Global repacking of all side chains.} Agreement between the crystal and the AlphaFold prediction falls
+(pooled r 0.926 to 0.921; fraction of entities above 0.9: 0.709 to 0.636) and accuracy does not move
+(0.573 to 0.571). Small backbone differences get amplified into different rotamer choices. This reproduces
+Vangaru and Bhattacharya (2025) in our own energy: keep the AlphaFold side chains, repack only the site and its
+shell.
+
+\textbf{Backbone-only burial in the 70--90 band.} +0.004 for one predictor, $-$0.009 for another; below the gate.
+
+\textbf{Trimming (the treatment that is kept).} The MAVISp-style rule gains 0.000 to +0.009 on Domainome and +0.014
+to +0.022 on Megascale-test, at the cost of 0.9\% of sites. Every Domainome interval touches zero. It is kept
+because it is free, standard and never harmful, not because it is proven. The Megascale gain is a test-set
+observation (the AlphaFold parameters were chosen on abundance data and half of Domainome), so it is supporting
+evidence only.
+
+\textbf{What actually works on AlphaFold input: flagging.} Withholding variants with site pLDDT below 70, within 3
+residues of a construct terminus, or in an exposed hydrophobic patch (14\% of rows) gains +0.038 per-domain rho
+for the fitted engine model, +0.035 for the reference physics model and +0.020 for the descriptor baseline ---
+more than every computation-changing treatment together. Withholding metal sites, by contrast, \emph{lowers} the
+score: those 7\% of rows are still partly predictable from burial, and they are the one place where FoldX
+collapses (0.44 to 0.14) while the physics models keep 0.22--0.39. Metal sites should be flagged and reported,
+not withheld.
+
+
+
+\section{S13. tmol as the engine}
+
+\textbf{Hypothesis and source.} tmol (Apache-2.0) is the Rosetta energy, Dunbrack packer and minimiser in batched
+PyTorch and CUDA, with no neural network. If it is fast and accurate enough, writing our own kernels is waste.
+
+\textbf{Numbers.} Raw tmol ddG is clearly worse than FoldX on Megascale (pooled Spearman 0.463 repack-only, 0.492
+with torsion minimisation, against FoldX 0.569), because 17\% of variants have a repulsion change above 20 REU
+from fixed-backbone clashes and the Pearson correlation collapses to 0.18--0.21. Refitting its 12 terms plus 20
+reference energies on a Megascale training subset, with all choices made by grouped CV, lifts it to pooled
+0.596 / per-protein 0.626 --- the level of FoldX and of our 10-weight baseline, and below our engine (0.692
+per-protein). Speed: 3.1 minutes for a 349-residue scan, against 18.7 s for our Stage 2 on 490 residues.
+
+\textbf{Decision.} Not adopted as the engine; kept as a baseline, where it is a useful one because it correlates only
+0.76 with our descriptor baseline and 0.66 with FoldX. Its bundled Dunbrack rotamer library has a licence
+question we did not resolve.
+
+
+
+\section{S14. Joint Megascale + FireProt fitting versus Megascale only}
+
+\textbf{Hypothesis.} Fitting both assays with per-assay scale and offset should buy generality.
+
+\textbf{What was done and the numbers.} The joint family is better on the abundance-type assays (Domainome 0.450
+against 0.418; strict 0.403 against 0.391; the seven abundance assays 0.484 against 0.469) and on FireProt
+(0.478 against 0.451 on all 347 rows), at a visible cost on the crystal sets (S669-strict 0.319 against 0.336;
+S461-strict 0.531 against 0.552) and no measurable Megascale cost ($-$0.001 [$-$0.038, +0.016] pooled). None of
+the FireProt differences is significant on any row set.
+
+\textbf{The decision rule, fixed before looking and applied to validation, CV and transfer only:} ship the family
+that wins on (i) Megascale validation natural per-protein rho, both families scored on identical held-out rows,
+which is the only directly comparable number that is not a test number; then (ii) grouped CV on each model's
+own training data; then (iii) transfer. Ties go to fewer fitted terms. Outcome: Megascale-only 0.7411
+validation / 0.6813 CV against joint 0.7297 / 0.6648 --- \textbf{the Megascale-only family ships}, and the joint fits
+ship as the multi-assay variant.
+
+\textbf{Honest note.} An earlier version of this project shipped the joint family, on a gate that was stated
+directly on Domainome and Megascale test numbers. Audit 2 flagged that, and the decision above is the
+re-decision without test data. Also note that FireProt-test is not an out-of-assay test for the joint models at
+all, and that 14 of its 347 rows share a single-linkage family with a FireProt training protein.
+
+
+
+\section{S15. Domainome as a target, and the reference energies that are wrong there}
+
+\textbf{What we found.} Domainome measures in-cell abundance of isolated domains, not folding free energy. Per-mutant
+amino-acid mean effects agree between Domainome and Megascale at buried sites (rho 0.84) and not at exposed
+sites (rho $-$0.09): exposed substitutions to F/W/Y/I/L/V score worst in the abundance assay, which is consistent with
+degron and aggregation effects, whereas in Megascale the worst substitutions are those to P/G/D. Every model with
+Megascale-fitted reference energies loses its within-site ranking on Domainome (within-site rho 0.24 for the
+model with no reference energies, against $-$0.01 to +0.10 for the models with them).
+
+\textbf{The diagnostic.} Zeroing the reference energies at inference, with the same weights and with no FireProt data
+anywhere, gains +0.020 [+0.009, +0.032] on Domainome and +0.017 [+0.001, +0.024] on the flag-kept subset, which
+recovers about half of the gain the joint fit achieves there. It costs everywhere else: FireProt 0.464 to 0.443,
+S669-strict 0.336 to 0.308, S461-strict 0.552 to 0.519, Megascale natural-strict 0.702 to 0.671. Refitting
+without the reference energies recovers nothing on Domainome (0.412), because the other weights absorb them.
+
+\textbf{Reading.} The Megascale reference energies are not globally wrong. They contain a component that is wrong
+specifically for an abundance assay at the surface. In the joint fit the Megascale-specific nuisance exceeds
+0.4 kcal/mol for one residue only, cysteine ($-$0.55; the next largest is arginine at +0.19), so the assay
+contamination is concentrated rather than diffuse.
+
+\textbf{Decision.} Domainome is never trained on and is used for validation only; training on it would make every
+Domainome number self-referential.
+
+
+
+\section{S16. Test-set looks and selection optimism}
+
+Hyper-parameter selection (term set, transforms, electrostatics variant, cap, loss) used Megascale validation
+and grouped CV only, and those tables contain no test column. The model-level decisions were not that clean.
+Counting from the version history, \textbf{at least 12 evaluations touched test data}: the first gate evaluation of
+the two engine models; the post-audit re-issue of the reporting protocol; audit 1; the AlphaFold treatments; the
+residual analysis; the B6 term set; the evolution mode; the final model choice; the elastic-network study; the
+differentiable-parameter study; the second critique's phase A; and the shipping decision that audit 2 reversed.
+\textbf{At least five changed what ships:} dropping \texttt{site\_scsc} (S10), shipping the joint family, shipping the
+AlphaFold variant, and the two reversals after audit 2 (the family choice and the disulfide term).
+
+With roughly 25 model variants and eight benchmarks, the implied optimism on \emph{marginal} deltas is of the same
+order as the deltas themselves: the shipped default minus the previous rung is +0.005 [$-$0.004, +0.019], the
+AlphaFold variant minus the default is +0.007 [$-$0.003, +0.014], and the joint model minus FoldX on Domainome is
++0.020 [$-$0.002, +0.045]. The headline comparison against FoldX (+0.063) is an order of magnitude larger than any
+of these and is the one claim that does not depend on this issue. The validation and CV columns are reported
+next to every decision for this reason.
+
+
+
+\section{S17. Hand-typed scale tables, replaced}
+
+The first version of the N-cap term used a hand-typed "Doig--Baldwin-type" table from memory. It could not be
+verified against the source, and its ranking contradicted the paper's abstract (it placed Gln mid-scale; Doig
+and Baldwin 1995 report Gln as the worst N-cap residue). It was replaced by a statistical potential derived from
+our own PISCES training split by the method of Richardson and Richardson (1988), E(aa) = $-$ln[P(aa $|$ N-cap) /
+P(aa)] in kT units over 58,800 N-caps. The derived ranking S < D < N < T < P < G < H < C < \ldots{} < L < V < I matches
+the published ordering, and the model gain is unchanged by the swap (validation 0.7329 to 0.7422 with the term
+alone). Two further hand-typed scales (Pace--Scholtz helix propensity, Minor--Kim beta propensity) failed
+selection and are unused; both are marked "do not cite" in the code.
+
+
+
+\section{S18. The evolution mode: positive, but a different information source}
+
+\textbf{What was done.} One extra weight on a sequence-profile log-ratio, from an HHblits search of UniClust30
+(2018\_08) with DDGun's settings; 1,492 chains profiled. No learned model and no embedding, only counting
+statistics plus one fitted weight ($-$0.113 $\pm$ 0.007 kcal/mol per nat). Selection on training CV and validation
+only.
+
+\textbf{Numbers.} Megascale all 28 per-protein rho 0.685 to 0.726 (+0.040 [$-$0.005, +0.071]); Domainome 0.411 to 0.486
+(+0.074 [+0.059, +0.084]); FireProt +0.022 (not significant); S669-strict Spearman +0.037 [+0.004, +0.075];
+abundance +0.040. The gain is largest at exposed natural sites, where the structural terms are weakest, and it
+is uniform across pLDDT bands on Domainome, where it lifts the sub-70 band from about zero to +0.06.
+
+\textbf{The caveat that keeps it out of the headline.} On the 14 homology-clean natural Megascale proteins the median
+change is \textbf{$-$0.006 [$-$0.037, +0.080]}, with a mean per-protein change of +0.014 and 9 of 14 proteins improving;
+the seven test proteins that do have a training homologue gain +0.062 (7 of 7 up). One weight cannot memorise
+families, so this is either noise or a sign that well-sampled families also have the most informative profiles ---
+but the clean subset shows no established gain. In addition, UniClust30 contains homologues of every natural
+benchmark protein, which is inherent to any evolutionary method and is not label leakage, but it does mean that
+"strict" here only means "no training homologue in the fit".
+
+\textbf{Decision.} Offered as an optional mode, reported separately, never in the headline.
+
+
+
+\section{S19. Things we did not try, or could not}
+
+\begin{itemize}
+\item \textbf{ColabFold models for viral proteins.} T4 lysozyme, M13 g3p, TEV protease and several others have no
+  AlphaFold database entry, so 308 FireProt and 368 Ssym rows are missing from the paired crystal/AlphaFold set.
+  Running a structure predictor was outside the scope set for this project.
+\item \textbf{The Dunbrack 2010 rotamer library.} Free for academic use but under a manually approved licence that cannot
+  be redistributed. We derived our own library instead; tmol bundles a copy whose licence we did not resolve.
+\item \textbf{More $\Delta$$\Delta$G data.} ThermoMutDB and ProTherm-derived sets overlap FireProt, S669 and Ssym heavily, so adding
+  them would contaminate the benchmarks rather than enlarge the training set.
+\item \textbf{Local relaxation.} Never tested. It is the one untried idea with a clear mechanism behind it, since
+  Valanciute et al. (2023) show that Rosetta's local Cartesian minimisation is what keeps accuracy on model
+  structures where FoldX collapses, and S4 shows random backbone noise is not a substitute.
+\item \textbf{Continuous torsion refinement} (gate G4) was never reached, because the dense backbone-dependent library
+  plus Boltzmann averaging makes sub-rotamer relaxation largely redundant.
+\item \textbf{A deep-learning comparison run by us.} ThermoMPNN, SPURS and RaSP were not rerun; all deep-learning numbers
+  in the main text are literature values from other papers' evaluations and are not directly comparable to our
+  protocol.
+\end{itemize}
+
+
+
+\section{S20. Datasets, splits and leakage statistics}
+
+\begin{center}\scriptsize
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.107\linewidth}>{\raggedright\arraybackslash}p{0.147\linewidth}>{\raggedright\arraybackslash}p{0.044\linewidth}>{\raggedright\arraybackslash}p{0.198\linewidth}>{\raggedright\arraybackslash}p{0.404\linewidth}@{}}
+\toprule
+dataset & rows & proteins & use & leakage against our training data \\
+\midrule
+Megascale (Dataset 3 singles) & 271,231 & 298 & train 215,731 / 239; val 27,328 / 31; test 28,172 / 28 & 9 of 28 test domains have a train homologue (1TUC and 2KXD are 100\% identical to a train domain); strict test subset 19 domains, 14 natural \\
+Megascale censored rows & 14,656 & 294 & train only, as intervals (11,363 used) & as above \\
+Megascale doubles & 162,472 & 153 & additivity probe only & as above \\
+FireProtDB & 3,403 & 99 & train 2,669 / 57; val 387 / 15; test 347 / 27 & 2 of 27 test proteins have a Megascale-train homologue; 3 share a single-linkage family with FireProt trainval (14 rows) \\
+S669 & 669 & 94 & external test, strict subset 488 / 87 & 7 of 94 proteins have a Megascale-train homologue (27.1\% of rows); 51 rows homologous to FireProt trainval \\
+S461 & 461 & 48 & external test, strict subset 290 / 43 & 113 rows (24.5\%) are mutations that also occur in Megascale-train \\
+Ssym & 684 (342 pairs) & 15 & antisymmetry diagnostic only & 96.5\% of rows have a FireProt-trainval homologue; 8 of 15 proteins are exact sequence matches \\
+S2648 & 2,633 & 132 & not used in the paper & 68.6\% of rows homologous to FireProt trainval \\
+Human Domainome & 536,164 (532,501 with a construct model) & 522 domains & validation / external test & 151 of 517 domains have a Megascale-train homologue, 90 a FireProt-trainval homologue; strict subset 347 domains \\
+ProteinGym abundance & 37,947 & 7 assays & external test & 0 of 7 proteins has a homologue in either training set; a median over 7 proteins is not interpretable \\
+Paired crystal / AlphaFold & 4,012 usable (3,858 scored) & 198 entities & AlphaFold agreement & 64\% of its rows are FireProt trainval, so it is only an honest test for the Megascale-only models \\
+PISCES statistical tables & 9,266 chains & --- & rotamer library, Ramachandran, environment, N-cap & contains homologues of 10/28 Megascale-test, 24/27 FireProt-test, 70/94 S669 and 262/517 Domainome proteins; re-deriving without the 300 overlapping chains moves predictions by 0.0014 kcal/mol and per-protein rho by at most 0.0005 \\
+\bottomrule
+\end{tabular}\end{center}
+
+Homology is defined by MMseqs2 all-against-all search at 25\% identity with 50\% coverage of the shorter sequence,
+taken as single-linkage connected components; 1,228 proteins form 436 families.
+
+
+
+\section{S21. Full per-assay results with confidence intervals}
+
+Megascale, Domainome and abundance: per-protein (per-domain) median Spearman rho. FireProt, S669 and S461:
+Pearson r. Brackets are 95\% cluster-bootstrap intervals. Rows marked (subset) are computed on fewer rows than
+the rest of the column.
+
+\subsection*{Megascale-test, 21 natural proteins (22,159 variants)}
+
+\begin{center}\scriptsize
+\begin{tabular}{@{}llll@{}}
+\toprule
+model & value [95\% CI] & mean per protein & proteins better than FoldX \\
+\midrule
+PhysDDG AF mode & 0.699 [0.669, 0.727] & 0.705 & 20 / 21 \\
+PhysDDG default (Stage 2) & 0.692 [0.659, 0.722] & 0.702 & 19 / 21 \\
+PhysDDG joint variant & 0.690 [0.646, 0.718] & 0.691 & 19 / 21 \\
+PhysDDG fast (Stage 1) & 0.678 [0.656, 0.711] & 0.691 & 18 / 21 \\
+simple baseline B3+ & 0.648 [0.631, 0.670] & 0.654 & 16 / 21 \\
+FoldX 5.1 (raw and clipped) & 0.629 [0.551, 0.697] & 0.629 & --- \\
+tmol, refitted & 0.622 [0.590, 0.678] & 0.636 & 15 / 21 \\
+DDGun3D & 0.516 [0.457, 0.584] & 0.528 & 0 / 21 \\
+KORPM & 0.500 [0.483, 0.575] & 0.512 & 3 / 21 \\
+\bottomrule
+\end{tabular}\end{center}
+
+Other metrics on the same rows: default model Pearson 0.701, RMSE 0.776 kcal/mol, pooled Spearman 0.668;
+clipped FoldX 0.596 / 1.845 / 0.592; raw FoldX 0.445 / 3.218 / 0.592; B3+ 0.646 / 0.831 / 0.624; tmol-refit
+0.629 / 0.846 / 0.601.
+
+\subsection*{Paired differences, Megascale-test (identical rows)}
+
+\begin{center}\scriptsize
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.285\linewidth}>{\raggedright\arraybackslash}p{0.205\linewidth}>{\raggedright\arraybackslash}p{0.205\linewidth}>{\raggedright\arraybackslash}p{0.205\linewidth}@{}}
+\toprule
+comparison & natural (21) & natural-strict (14) & all (28) \\
+\midrule
+default $-$ FoldX-clipped & +0.063 [+0.006, +0.120] & +0.062 [+0.009, +0.119] & +0.058 [+0.017, +0.121] \\
+AF mode $-$ FoldX-clipped & +0.070 [+0.013, +0.122] & +0.064 [+0.021, +0.119] & +0.065 [+0.023, +0.127] \\
+fast $-$ FoldX-clipped & +0.050 [$-$0.001, +0.109] & +0.050 [+0.003, +0.114] & +0.051 [+0.004, +0.113] \\
+default $-$ B3+ & +0.044 [+0.013, +0.072] & +0.053 [+0.015, +0.068] & +0.043 [+0.014, +0.066] \\
+default $-$ tmol-refit & +0.070 [+0.032, +0.097] & +0.064 [+0.007, +0.118] & +0.066 [+0.015, +0.088] \\
+default $-$ base Stage 2 & +0.005 [$-$0.004, +0.019] & +0.004 [$-$0.007, +0.009] & +0.006 [$-$0.004, +0.019] \\
+AF mode $-$ base Stage 2 & +0.012 [+0.000, +0.027] & +0.006 [$-$0.001, +0.012] & +0.013 [+0.001, +0.026] \\
+fast $-$ base Stage 2 & $-$0.008 [$-$0.011, +0.006] & $-$0.007 [$-$0.027, +0.006] & $-$0.001 [$-$0.019, +0.008] \\
+default $-$ FoldX-clipped, Pearson & +0.105 [+0.068, +0.135] & +0.111 [+0.056, +0.148] & +0.097 [+0.064, +0.127] \\
+\bottomrule
+\end{tabular}\end{center}
+
+\subsection*{The other assays}
+
+\begin{center}\scriptsize
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.097\linewidth}>{\raggedright\arraybackslash}p{0.035\linewidth}>{\raggedright\arraybackslash}p{0.054\linewidth}>{\raggedright\arraybackslash}p{0.054\linewidth}>{\raggedright\arraybackslash}p{0.054\linewidth}>{\raggedright\arraybackslash}p{0.092\linewidth}>{\raggedright\arraybackslash}p{0.054\linewidth}>{\raggedright\arraybackslash}p{0.135\linewidth}>{\raggedright\arraybackslash}p{0.265\linewidth}@{}}
+\toprule
+assay & n / proteins & default & fast & AF mode & joint & B3+ & FoldX & other \\
+\midrule
+FireProt-test, Pearson & 347 / 27 & 0.451 [0.224, 0.619] & 0.444 [0.208, 0.614] & 0.451 [0.223, 0.620] & 0.478 [0.244, 0.644] & 0.432 [0.182, 0.606] & 0.411 / clipped 0.417 [0.241, 0.568] (subset, 341) & tmol-refit 0.477 (subset, 344); DDGun3D 0.488 [0.223, 0.639]; KORPM 0.397 \\
+S669-strict, Pearson & 488 / 87 & 0.336 [0.158, 0.507] & 0.346 [0.163, 0.522] & 0.336 & 0.319 [0.139, 0.479] (470 rows) & 0.339 [0.139, 0.530] & not run & DDGun3D 0.347 [0.171, 0.505]; KORPM 0.194 \\
+S461-strict, Pearson & 290 / 43 & 0.552 [0.364, 0.660] & 0.572 [0.366, 0.673] & 0.552 & 0.531 [0.326, 0.647] (285 rows) & 0.570 [0.332, 0.660] & not run & DDGun3D 0.552; KORPM 0.543 \\
+Domainome & 509,388 / 493 & 0.418 [0.377, 0.464] & 0.414 [0.376, 0.459] & 0.425 [0.382, 0.468] & 0.450 [0.398, 0.492] & 0.389 [0.352, 0.419] & 0.430 [0.367, 0.483] & KORPM 0.302; DDGun3D 0.282 (subset, 47 domains) \\
+Domainome strict & 358,755 / 347 & 0.391 [0.347, 0.433] & 0.389 [0.350, 0.429] & 0.397 [0.350, 0.438] & 0.403 [0.352, 0.468] (320 domains) & 0.369 [0.330, 0.407] & 0.385 [0.310, 0.464] & KORPM 0.274 \\
+Domainome, flagged variants withheld & 441,283 / 493 & 0.449 [0.400, 0.481] & 0.450 [0.402, 0.480] & 0.454 [0.403, 0.487] & 0.480 [0.419, 0.510] & 0.407 [0.362, 0.431] & 0.458 [0.396, 0.503] & KORPM 0.315 \\
+abundance DMS & 37,947 / 7 & 0.469 [0.343, 0.490] & 0.468 & 0.478 [0.351, 0.499] & 0.484 & 0.446 & not run & a median over 7 proteins is not interpretable; no delta on this assay should be called significant \\
+\bottomrule
+\end{tabular}\end{center}
+
+Selected paired differences on the other assays: default $-$ FoldX on Domainome $-$0.012 [$-$0.038, +0.021] (strict
++0.007 [$-$0.038, +0.042]); joint $-$ FoldX on Domainome +0.020 [$-$0.002, +0.045]; joint $-$ base Stage 2 on Domainome
++0.038 [+0.019, +0.053]; default $-$ FoldX-clipped on FireProt +0.036 [$-$0.069, +0.102]; default $-$ base Stage 2 on
+FireProt $-$0.005 [$-$0.011, $-$0.000]. No FireProt comparison between any pair of methods is significant on any row
+set.
+
+\subsection*{Matched rows, where strictness differs between model families}
+
+\begin{center}\scriptsize
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.223\linewidth}>{\raggedright\arraybackslash}p{0.202\linewidth}>{\raggedright\arraybackslash}p{0.202\linewidth}>{\raggedright\arraybackslash}p{0.274\linewidth}@{}}
+\toprule
+ & S669, both-strict (470 / 82) & S461, both-strict (285 / 42) & Domainome, both-strict (323,643 / 320) \\
+\midrule
+B3+ / base Stage 2 & 0.330 / 0.315 & 0.569 / 0.556 & 0.366 / 0.381 \\
+default / fast / AF mode & 0.316 / 0.328 / 0.316 & 0.549 / 0.569 / 0.549 & 0.384 / 0.380 / 0.393 \\
+joint, Stage 2 / Stage 1 / AF & 0.319 / 0.330 / 0.319 & 0.531 / 0.550 / 0.531 & 0.403 / 0.405 / 0.410 \\
+FoldX-clipped / KORPM / DDGun3D & --- / 0.194 / 0.347 & --- / 0.543 / 0.552 & 0.378 / 0.274 / --- \\
+\bottomrule
+\end{tabular}\end{center}
+
+\subsection*{Known weaknesses, with numbers}
+
+\begin{center}\scriptsize
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.330\linewidth}>{\raggedright\arraybackslash}p{0.150\linewidth}>{\raggedright\arraybackslash}p{0.420\linewidth}@{}}
+\toprule
+property & PhysDDG & better method \\
+\midrule
+Ssym antisymmetry, correlation(direct, $-$reverse) / bias & 0.23--0.25 / +1.4 kcal/mol & KORPM 0.88 / +0.15; DDGun3D 0.99 / +0.04 \\
+precision@5 for stabilising mutations & 0.15--0.23 & FoldX 0.219; tmol-refit 0.181 (our AUROC is higher: 0.74 against 0.72) \\
+buried small-to-large substitutions, per-protein rho & 0.49 & FoldX 0.55 \\
+S669-strict, Pearson & 0.336 & DDGun3D 0.347; our own 10-weight baseline 0.339 \\
+Domainome below pLDDT 70 & about 0 & every method is about 0 \\
+\bottomrule
+\end{tabular}\end{center}
+
+
+
+\section{S22. Parameter table}
+
+\begin{center}\scriptsize
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.089\linewidth}>{\raggedright\arraybackslash}p{0.094\linewidth}>{\raggedright\arraybackslash}p{0.094\linewidth}>{\raggedright\arraybackslash}p{0.047\linewidth}>{\raggedright\arraybackslash}p{0.089\linewidth}>{\raggedright\arraybackslash}p{0.110\linewidth}>{\raggedright\arraybackslash}p{0.318\linewidth}@{}}
+\toprule
+model & weights & reference energies & intercept & nested base model & total fitted to ddG & also fitted, dropped at inference \\
+\midrule
+default (Stage 2) & 20 (1 pinned at 0) & 20 & 1 & --- & \textbf{41} (40 effective) & --- \\
+fast (Stage 1) & 22 & 20 & 1 & --- & \textbf{43} & --- \\
+AF mode & 21 & 20 & 1 & 41 & \textbf{83} & --- \\
+joint variants & 19--21 & 20 & 1 & 40 (AF) & 40 / 42 / 81 & 22 (FireProt scale and offset, 20 Megascale reference deltas) \\
+\bottomrule
+\end{tabular}\end{center}
+
+Fitted weights of the default model (kcal/mol per unit, $\pm$ cluster-bootstrap standard error over 200 draws):
+
+\begin{center}\scriptsize
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.138\linewidth}>{\raggedright\arraybackslash}p{0.121\linewidth}>{\raggedright\arraybackslash}p{0.640\linewidth}@{}}
+\toprule
+term & weight & reading \\
+\midrule
+\texttt{e\_lj\_atr} & +0.091 $\pm$ 0.005 & Lennard-Jones attraction lost \\
+\texttt{e\_lj\_rep} & +0.150 $\pm$ 0.026 & steric clash, signed-log transformed \\
+\texttt{e\_solv\_apolar} & +0.107 $\pm$ 0.014 & EEF1 apolar desolvation \\
+\texttt{e\_solv\_polar} & +0.129 $\pm$ 0.005 & EEF1 polar desolvation \\
+\texttt{e\_hb\_sc\_bb} & +0.223 & side-chain to backbone hydrogen bonds lost \\
+\texttt{e\_hb\_sc\_sc} & +0.116 & side-chain to side-chain hydrogen bonds lost \\
+\texttt{e\_hb\_bb\_bb} & +0.340 & backbone hydrogen bonds lost \\
+\texttt{e\_elec\_dh} & +0.343 $\pm$ 0.045 & Debye--Hückel electrostatics at 0.15 M \\
+\texttt{dTS} & $-$0.080 $\pm$ 0.014 & side-chain conformational entropy (negative = stabilising) \\
+\texttt{dprior\_avg} & +0.120 $\pm$ 0.020 & rotamer prior \\
+\texttt{d\_env\_cn\_ss\_bb} & +0.221 $\pm$ 0.018 & environment statistical potential, per kT \\
+\texttt{d\_rama} & +0.205 & Ramachandran at the site \\
+\texttt{d\_rama\_prev} & +0.120 & pre-proline map at i$-$1 \\
+\texttt{bur} & +0.916 $\pm$ 0.077 & burial, 1 $-$ RSA \\
+\texttt{occ\_dvol\_loss} & +1.086 $\pm$ 0.133 & cavity creation \\
+\texttt{gly\_posphi} & $-$0.387 $\pm$ 0.082 & Gly$\rightarrow$X at positive phi; a correction to \texttt{d\_rama}, read jointly \\
+\texttt{ncap\_pref} & +0.294 $\pm$ 0.037 & N-cap potential, per kT \\
+\texttt{helix\_dipole} & +0.086 $\pm$ 0.021 & charge change at a helix terminus \\
+\texttt{pro\_nhhb} & 0.000 & at its bound; the backbone hydrogen-bond term already carries the lost N--H \\
+\texttt{ss\_broken} & 0.000 & pinned; Megascale contains no disulfide-breaking rows \\
+\bottomrule
+\end{tabular}\end{center}
+
+The AlphaFold model adds \texttt{scale\_plddt} = $-$0.966 (bootstrap mean $-$1.12, 2.5--97.5 percentile $-$2.52 to $-$0.23 over
+200 draws), which scales the prediction by 1 $-$ 0.97$\cdot$(1 $-$ pLDDT/100) and is identically zero on crystal input.
+
+Removing every sign constraint moves all other weights by at most 0.022 kcal/mol and changes validation and CV
+metrics by at most 0.0001.
+
+Tables estimated from structures and never from ddG: the backbone-dependent rotamer library (PISCES, 9,266
+chains), Ramachandran maps, the environment potential (about 180 entries), the N-cap potential (20 entries), and
+about 15 frozen CHARMM19 and EEF1 constants with literature provenance. The repulsive radii carry one structural
+calibration factor of 0.9, chosen by native-rotamer recognition and not by ddG.
+
+
+
+\section{S23. FoldX protocol}
+
+\begin{itemize}
+\item \textbf{Binary:} FoldX 5.1 under an academic licence, run outside this repository, protocol RepairPDB followed by
+  BuildModel on the benchmark structures.
+\item \textbf{Sign:} FoldX reports positive = destabilising, which matches our convention; no flip was applied.
+\item \textbf{Options not recorded.} \texttt{numberOfRuns}, \texttt{--temperature}, \texttt{--pH}, \texttt{--ionStrength} and \texttt{--vdwDesign} were not
+  written down and no configuration files were kept. The binary's defaults are \texttt{numberOfRuns 1}, 298 K, pH 7,
+  0.05 M, \texttt{vdwDesign 2}, and that is what we assume. Every statement about the FoldX baseline should therefore
+  read "FoldX 5.1, RepairPDB then BuildModel, run options not recorded, defaults assumed". With a single
+  BuildModel run some of FoldX's error is run-to-run variance that averaging would remove, which makes our
+  comparison mildly pessimistic for FoldX on rank.
+\item \textbf{pH.} FireProt rows span pH 1.5 to 11, so a single pH 7 run is wrong for part of that set --- for FoldX and
+  for us equally, since our model has no pH term.
+\item \textbf{Structures.} Megascale has no crystal structures: all 298 domains are the AlphaFold2 models released with
+  the assay, so FoldX ran RepairPDB on AlphaFold2 models and our model is fitted on the same files. Both methods
+  see exactly the same input, so the comparison is fair in the identical-rows sense; it is the generalisation
+  reading that needs the caveat.
+\item \textbf{Coverage.} FoldX covers 100\% of Megascale-test, 341 of 347 FireProt-test rows and 493 of 518 Domainome
+  constructs. We use its construct-level Domainome run, not the full-length one, because the assay measures
+  isolated constructs.
+\item \textbf{Transform symmetry.} We report FoldX raw and clipped to [$-$3, 8], a fixed monotone transform with nothing
+  fitted, because its raw predictions reach 71 kcal/mol and that alone costs 0.15 Pearson. Our own repulsion
+  feature carries a signed-log transform that was selected on validation. Compressing the extreme values helps both models, so
+  the clipped column is the like-for-like comparison.
+\end{itemize}
+
+
+
+\section{S24. Audit findings, summarised}
+
+Two audits were run by agents that did not write the code that they audited. Both recomputed metrics from the raw
+prediction files with their own code. Their reports are released unedited.
+
+\textbf{Audit 1} (leakage, evaluation correctness, over-claims):
+
+\par\noindent 1. The catalytic-CXXC exception was derived from two FireProt \emph{test} rows (S11). Removing it drops the joint
+   models' FireProt Pearson from 0.48 to 0.39.
+\par\noindent 2. S461 is contaminated: 113 of 461 rows (24.5\%) are mutations that also occur in Megascale-train. Report strict
+   subsets only.
+\par\noindent 3. Ssym is not a test set for any model trained on FireProt (85.7\% exact duplicate mutations).
+\par\noindent 4. The pre-registered gate against FoldX fails on rank for the two early engine models (+0.048 [$-$0.008, +0.105]
+   and +0.058 [$-$0.003, +0.113] on the primary subset) and passes only on the two secondary subsets. The honest
+   wording is "ahead in point estimate on every Megascale subset, significantly so on two of three".
+\par\noindent 5. The large Pearson advantage over FoldX is mostly its uncapped tail: clipping lifts FoldX from 0.445 to 0.596,
+   so the gap is +0.10 and not +0.25.
+\par\noindent 6. The headline natural subset is not homology-clean (21 proteins, 14 strict), although the strict number is not
+   lower.
+\par\noindent 7. The statistical-table overlap with benchmark proteins is real but negligible (per-protein rho changes by at
+   most 0.0005 when the tables are re-derived without the 300 overlapping chains).
+\par\noindent 8. Main-table cells were not on identical rows; the paired comparisons were.
+\par\noindent 9. The wild-type-to-wild-type test was tautological and was replaced by tests of the property that matters.
+
+\textbf{Audit 2} (the joint models, inference correctness, claims), with every model-card cell recomputed
+independently:
+
+\par\noindent 1. \textbf{Critical.} The FireProt column was computed on 338 of 347 rows and the two missing rows were exactly the
+   ones that discriminate the models (S11). Fixed: all FireProt numbers are now on 347 rows.
+\par\noindent 2. \textbf{Critical.} The shipped model had been selected partly on test numbers; at least 12 test evaluations and at
+   least 5 that changed what ships (S16). Fixed: the family was re-decided on validation, CV and transfer only,
+   and the 12 evaluations are disclosed.
+\par\noindent 3. \textbf{Critical.} The \texttt{final\_*} prediction columns in the repository were stale and belonged to a superseded
+   family. Fixed: all shipped files are now produced by one export script and the prediction columns were
+   regenerated.
+\par\noindent 4. Domainome had no homology filter; every absolute number falls by about 0.03 when training homologues are
+   removed, and the abundance assays had never been screened (they turn out to be clean, 0 of 7).
+\par\noindent 5. The parameter count was understated: 41 / 43 / 83, not 40.
+\par\noindent 6. The guarantee that crystal input is never attenuated holds on every shipped path, but it rests on a string
+   match with a B-factor fallback that would misclassify 21 of 94 S669, 9 of 48 S461 and 5 of 99 FireProt
+   crystal structures if a caller used the lower-level entry point without declaring the structure type.
+\par\noindent 7. Confidence intervals quoted to three decimals from 200 bootstrap draws; the headline reproduces at 2,000
+   draws (+0.063 [+0.008, +0.096] for the joint model against clipped FoldX), but marginal bounds should be
+   rounded to two decimals.
+\par\noindent 8. The paired crystal/AlphaFold set is 64\% joint-model training data, so the "AlphaFold is never worse than the
+   crystal" result holds only for the Megascale-only models, and even there the intervals for the fitted models
+   touch zero.
+\par\noindent 9. A list of claims the final report must not make, which we have followed: no "best structure-only model on
+   FireProt", no identical-rows claim without a fixed strictness rule, no homology-clean Domainome or abundance
+   claim, no "the physics generalises across assays", no "one test look", no "40 parameters", no significance
+   for the marginal deltas listed in S16, and no AlphaFold-specific correction that improves accuracy.
+
+Inference-side checks that passed: the nuisance parameters are never applied at inference (verified by
+corrupting them and observing bit-identical output); the command-line tool reproduces the stored predictions to
+7e$-$6; a wild-type-to-wild-type substitution returns exactly zero; per-term contributions sum to the prediction
+to machine precision; predictions are bitwise reproducible across runs and across GPUs; signs are correct and
+well separated (32 buried hydrophobic-to-charged variants of one protein average +2.76 kcal/mol, all positive).
+
+\end{document}

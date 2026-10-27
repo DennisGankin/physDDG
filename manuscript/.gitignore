@@ -1,0 +1,4 @@
+tools/tectonic
+tools/oup/
+__pycache__/
+*.log
