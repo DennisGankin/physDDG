@@ -4,8 +4,15 @@ A structure-based, physics-inspired predictor of the effect of single missense m
 stability (ΔΔG, kcal/mol, **positive = destabilising**). No deep learning: a GPU-batched force-field-style energy
 (CHARMM19/EEF1-type terms, geometric H-bonds, screened electrostatics), a PDB-derived backbone-dependent rotamer
 library with Boltzmann averaging over rotamers, optional mean-field repacking of the neighbouring side chains, PDB
-statistical potentials, and 20 weights + 20 reference energies fitted to ΔΔG (Megascale-train + FireProt-train).
-Torch is used only as a GPU array library.
+statistical potentials, and a linear read-out fitted to ΔΔG (Megascale-train + FireProt-train).
+
+Numbers fitted to ΔΔG, counted from the shipped JSONs (weights + 20 reference energies + intercept):
+**43** for `final_stage1.json` (22 weights), **41** for `final_stage2.json` (20 weights) and **83** for
+`final_af.json` (21 weights + 20 + 1, plus its complete nested base model `scale_base`, 41 more, evaluated at
+inference). The joint fits also estimated 22 nuisance parameters from ΔΔG (FireProt scale and offset, 20 Megascale
+δ_ref); they are dropped at inference but were fitted. In addition the model uses tables estimated from structures,
+never from ΔΔG (rotamer library, Ramachandran maps, environment and N-cap potentials), and ~15 frozen
+CHARMM19/EEF1 constants with literature provenance (`physddg/params.py`). Torch is used only as a GPU array library.
 
 Full model card (terms, training data, results, weaknesses): `notes/ladder_physics.md`. Engine internals:
 `notes/engine_{geometry,energy,mutate}.md`; AlphaFold handling: `notes/af_mode.md`; research log: `RESEARCH_TREE.md`.
@@ -57,7 +64,7 @@ counterparts, kept for comparison. Numbers below are copied from the model card 
 
 | file (`results/ladder_physics/models/`) | fit | what is computed | use |
 |---|---|---|---|
-| `final_stage1.json` (B6gjs1) | joint | stage 1: Boltzmann over the site's library rotamers in the fixed WT environment, + PDB statistics, N-cap, helix dipole | **default here**; saturation scans / proteome scale (~3× faster) |
+| `final_stage1.json` (B6gjs1) | joint | stage 1: Boltzmann over the site's library rotamers in the fixed WT environment, + PDB statistics, N-cap, helix dipole | **default here**; saturation scans / proteome scale (2–2.5× faster than stage 2 end to end, see Speed) |
 | `final_stage2.json` (B6gj) | joint | stage 1 + mean-field repacking of the ≤ 16 side chains within 6 Å (identical candidate sets for WT and mutant) | best accuracy on crystal or AF input |
 | `final_af.json` (B6gjaf) | joint | stage 2 + pLDDT attenuation, with the D18 treatments below | **only** where B-factors are pLDDT (AlphaFold models) |
 | `ref_stage1/2/af.json` (B6g family) | Megascale-only | same forms | ablation / comparison |
@@ -116,6 +123,10 @@ The machine was shared with other jobs during this run; single-GPU numbers vary 
 | 6Q62 A (269) | 5,111 | **3.6 s** | 10.3 s | 8.2 s | 13.0 s | 7–14 CPU-h | 2.2 s |
 | 3EDF A (597) | 11,343 | **10.0 s** | 13.2 s | 23.7 s | 19.0 s | 16–32 CPU-h | 5.0 s |
 
+How to read this table: against FoldX the comparison is GPU-seconds versus CPU-hours (a 269-residue scan takes
+3.6 s on one GPU against 7–14 CPU-hours for FoldX BuildModel). Per mutation, stage 1 is **at parity with KORPM**
+(≈ 0.7 ms per mutation on one GPU vs 0.44 ms on one CPU core); PhysDDG is not the fastest method per mutation.
+
 AF mode (crop/trim + stage 2 + attenuation + flags), 1 GPU, AlphaFold DB yeast models: 150 res 5.3 s, 298 res
 12.0 s, 603 res 22.6 s. Stage 1 is ≈ 80% GPU and 20% CPU (0.8 s of 3.6 s at 269 residues: site descriptors, SASA,
 structure-statistics tables). Whole tables on 4 GPUs (one process per GPU, CPU preparation overlapped):
@@ -127,8 +138,12 @@ stage 1), `results/examples/AF-A0A2R8Y422_PF00240_crop2-71_scan_af.csv` (AF mode
 construct) and `results/examples/AF-P20486_yeast_scan_af.csv` (full AF model with trimming, flags, `withheld`).
 
 ## Reproducing results
-Everything in `results/` comes from a numbered script; run them as
-`PYTHONPATH=. .venv/bin/python scripts/<script>` (the `*.sh` ones with bash). **Only the code, the fitted models,
+Results come from numbered scripts; run them as `PYTHONPATH=. .venv/bin/python scripts/<script>` (the `*.sh`
+ones with bash). **Exceptions** (audit 2, I8): `results/ladder_physics/models/final_{stage1,stage2,af}.json` and
+`ref_*.json` are aliases of B6gjs1 / B6gj / B6gjaf and B6gs1 / B6g / B6gaf (identical weights plus
+`alias_of` / `release` keys) written by hand at release time; the underlying `B6g*.json` models are produced by
+`52_ladder_physics.py --stage fit`. `results/ladder_physics/final_selection_ablation.csv` needs `--stage final`,
+which `--stage all` does not run. The fitting lead is scripting both (R-fit5). **Only the code, the fitted models,
 the PDB-derived tables (`physddg/data/*.npz`, 6 MB) and `examples/` are in the repository.** Everything else is
 regenerated: `data/raw` (≈ 117 GB of downloads), `data/processed` (0.4 GB), `data/structures` (0.5 GB),
 `data/features` (11 GB) and the large prediction tables are git-ignored. External requirements that are *not*
@@ -147,12 +162,19 @@ Order and approximate wall-clock times on this machine (64 CPUs, 4 × RTX 4090):
 | 4 | `40_build_rotlib.py` | PISCES download + rotamer library, Ramachandran, entropy, environment potentials → `physddg/data/*.npz` | ~3 min (48 CPUs) + 2 GB download |
 | 5 | `41`–`43`, `44`, `45a`–`45d` | geometry and energy validation (ideal ICs, builder RMSD/coverage, DSSP cross-check, gradients, native sanity, chi discrimination, kernel speed) | ~20 min |
 | 6 | `50_features_simple.py` | structure-statistics features for all tables | ~10 min (48 CPUs) |
+| 6b | `53_ncap_stats.py` | PDB-derived N-cap potential → `physddg/data/ncap_pref.json` (needed by the B6 terms) | ~2 min |
 | 7 | `55_phys_features.py --stage 1` then `--stage 2` (optionally `--variants capA capB capC`) | engine features for all 9 tables → `data/features/phys_s{1,2}_*.parquet` | ~5 min + ~15 min per variant (2 GPUs) |
-| 8 | `53_ncap_stats.py` | PDB-derived N-cap potential → `physddg/data/ncap_pref.json` | ~2 min |
-| 9 | `51_baseline_ladder.py`, `52_ladder_physics.py --stage all` | baselines B0–B3+, then the fits, ablations, gates, final models → `results/ladder_physics/models/*.json` | ~1–2 h |
+| 9 | `51_baseline_ladder.py`, then `52_ladder_physics.py --stage all`, `--stage fit`, `--stage final` | baselines B0–B3+, then selection, fits, ablations, gates and the final models → `results/ladder_physics/models/*.json` (aliases: see Exceptions) | ~1–2 h |
+| 9b | `55_multiassay_report.py` | model-card headline tables (`multiassay_summary.csv`, `multiassay_deltas.csv`); note the shared `55_` prefix with `55_phys_features.py` (step 7) | ~10 min |
+| 9c | `54_doubles_additivity.py` | additivity probe on Megascale double mutants | ~10 min |
 | 10 | `30`–`32`, `60`–`61`, `70`–`74` | evaluation harness, FoldX/trivial baselines, tmol, KORPM, DDGun3D | hours (FoldX and DDGun dominate; external binaries) |
 | 11 | `80`–`86` | AlphaFold-mode study and gates | ~1 h |
-| 12 | `56`–`59`, `90`–`94`, `99_*`, `10a`–`10d`, `11x`, `12x` | rotamer recovery, ΔF sanity, backbone ensemble, speed benchmark, residual analysis, audits, optional evolution/ENM/differentiable-parameter extensions | minutes to hours each |
+| 12 | `56`–`59`, `90`–`94`, `10a`–`10d`, `11x`, `12x` | rotamer recovery, ΔF sanity, backbone ensemble, speed benchmark, residual analysis, optional evolution/ENM/differentiable-parameter extensions | minutes to hours each |
+
+Audit re-computations (`notes/audit_1.md`, `notes/audit_2.md`): `99_audit_eval.py`, `99_audit_dup_mutations.py`,
+`99_audit_pdbstats_leak.py`, `99_audit_pdbstats_rederive.py` (minutes each, need the step-1–9 outputs).
+`59_speed_benchmark.py` needs the AlphaFold DB yeast models under `/workspace/data/yeast_af/pdbs/` and the
+local PDB mirror; the four crystal benchmark structures it extracts are listed in its docstring.
 
 Smoke test of a fresh clone (code only, no data):
 ```bash

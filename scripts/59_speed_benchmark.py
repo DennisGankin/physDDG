@@ -3,7 +3,7 @@
 annotation, engine features, structure-statistics features and scoring.
 
 (a) Full saturation scans (19 x L variants) of four single-chain X-ray structures (~60, 150, 300, 600 residues;
-    data/structures/bench/, extracted from PISCES test entries by this script) for stage 1 (B4) and stage 2 (B5):
+    data/structures/bench/, extracted from PISCES test entries by this script) for stage 1 (final_stage1, B6gjs1) and stage 2 (final_stage2, B6gj), plus AF mode (final_af):
     1 GPU in-process (model loaded, CUDA warm; also the cold CLI start overhead) and N GPUs (sites sharded over
     one process per GPU, includes process spawn + CUDA init).
 (b) Whole benchmark tables through run_jobs: Megascale-test (28k variants) and Domainome (536k), stage 1 / 2.
