@@ -78,6 +78,8 @@ The site is always modelled from library rotamers (the WT side chain at the muta
 mutant go through the same code path. The backbone is fixed.
 
 ### Accuracy (copied from the model card, `notes/ladder_physics.md`; identical rows per column; strict = no homologue
+
+**Under revision (audit 2, D23):** the model card is being corrected (FireProt column on the full row set, "identical rows per column" does not hold for S669-str, S461-str and the Domainome DDGun3D cell, test evaluations used during selection). This table will be replaced verbatim by the corrected card's table; until then treat it as provisional.
 of any training set that model saw; Megascale/Domainome/abundance = per-protein median ρ, FireProt/S669/S461 = Pearson)
 | model | MS nat | MS nat-strict | MS all | FireProt | S669-str | S461-str | Domainome | Dom flag-kept | abundance |
 |---|---|---|---|---|---|---|---|---|---|
@@ -93,8 +95,8 @@ per-protein ρ; Pearson 0.694 vs 0.596, RMSE 0.79 vs 1.85 kcal/mol. Known weakne
 card: not antisymmetric (Ssym r 0.23–0.25 vs 0.88 for KORPM); stabilising mutations precision@5 0.15–0.23 (FoldX
 0.219); ρ ≈ 0 below pLDDT 70 — flag and withhold rather than predict; buried small→large 0.49 vs FoldX 0.55;
 S669-strict 0.344 is parity with DDGun3D, not a win; Megascale is AF2 models, so structure source is confounded
-with assay; the B6 term set was chosen after one test look, so Megascale B5 → B6g/B6gj test deltas carry mild
-selection optimism.
+with assay; the B6 terms were selected with repeated test-set evaluations (audit 2 counts ≥ 12), so
+B5 → B6g/B6gj test deltas carry selection optimism.
 
 ## Limits (what PhysDDG does not do)
 - **Ligands, metals, cofactors, nucleic acids** are ignored (HETATM groups are dropped; `hetatm_5A` flags affected sites).
