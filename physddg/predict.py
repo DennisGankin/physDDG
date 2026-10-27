@@ -333,6 +333,10 @@ class PhysDDG:
         self.opts = self.model["derive_opts"]
         self.caps = self.model.get("provenance", {}).get("caps")
         self.scale_kind = self.model.get("scale_kind")
+        if str(device).startswith("cuda") and not torch.cuda.is_available():
+            import warnings
+            warnings.warn("CUDA not available: running on CPU (slow)")
+            device = "cpu"
         self.device, self.mode = device, mode
         self.trim = (mode == "af") if trim is None else trim
         from .mutate import CAP_VARIANTS, MutateConfig
