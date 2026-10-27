@@ -499,7 +499,8 @@ def stabilising(df, col, k=5):
 
 
 # Models fitted with FireProt-trainval: their "strict" subsets must also exclude FireProt-trainval homologues.
-JOINT_MODELS = {"B4j", "B5j", "B6j", "B6gj", "B6gjs1", "B6gjaf", "B4j+C", "B5j+C", "B6x-j", "tmol-refit", "KORPM", "DDGun3D"}
+JOINT_MODELS = {"B4j", "B5j", "B6j", "B6gj", "B6gjs1", "B6gjaf",
+                "alt_multiassay_stage1", "alt_multiassay_stage2", "alt_multiassay_af", "B4j+C", "B5j+C", "B6x-j", "tmol-refit", "KORPM", "DDGun3D"}
 MS_ONLY_STRICT = "homolog_in_megascale_train==0"
 BOTH_STRICT = "homolog_in_megascale_train==0,homolog_in_fireprot_trainval==0"
 
@@ -511,9 +512,11 @@ def strict_expr(model: str, bench: str) -> str:
 
 
 SUBSETS = dict(L.SUBSETS)
-# D17(2): S461/S669 reported on strict subsets only (S461-all has 24.5% exact Megascale-train duplicate mutations)
-SUBSETS["s461"] = {"strict": SUBSETS["s461"]["strict"]}
-SUBSETS["s669"] = {"strict": SUBSETS["s669"]["strict"]}
+# D17(2): S461/S669 reported on strict subsets only (S461-all has 24.5% exact Megascale-train duplicate
+# mutations). The base rule is the Megascale-only one; strict_expr() widens it to both-strict for models that
+# also saw FireProt-trainval (D23/audit-2 I1), which is why n differs by family in those columns.
+SUBSETS["s461"] = {"strict": MS_ONLY_STRICT}
+SUBSETS["s669"] = {"strict": MS_ONLY_STRICT}
 SUBSETS["domainome"] = {"all": "", "plddt70": "plddt>=70", "strict": "homolog_in_megascale_train==0",
                         "flag_kept": "plddt>=70,x_dist_term>=3",
                         "plddt<50": "plddt<50", "plddt50-70": "plddt>=50,plddt<70", "plddt70-90": "plddt>=70,plddt<90",
@@ -590,6 +593,8 @@ def stage_eval(n_boot=1000):
         # flagged in the report (e.g. DDGun3D runs on 50 of 518 Domainome domains).
         low_cov = {c for c in cols if b[c].notna().mean() < 0.95}
         tab_cols = [c for c in cols if c not in low_cov]
+        if bench == "fireprot":      # audit 2 C1: the 2 rows tmol misses are the ones that discriminate models
+            tab_cols = []
         for sub, expr in subs.items():
             per_model = "strict" in sub and "homolog_in_megascale_train==0" in expr
             d = E.apply_subset(b, expr)
