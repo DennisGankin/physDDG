@@ -252,7 +252,9 @@ def parse_sites(spec: str | None) -> set | None:
 
 # ============================================================================= predictor
 def default_weights(stage: int, mode: str = "xtal") -> Path:
-    """Shipped model for (stage, mode): final_* (fitting agent's D19 files) if present, else the newest B6 family."""
+    """Shipped model for (stage, mode): final_*.json (D22: joint Megascale+FireProt fits B6gjs1 / B6gj / B6gjaf; their
+    `nuisance` blocks are never applied, fit.predict ignores them) if present, else the B6g family. The Megascale-only
+    models are ref_*.json (`PhysDDG(weights='ref')`, CLI `--weights ref`)."""
     if mode == "af":
         cands = ["final_af.json", "B6gaf.json", "B6af.json"] if stage == 2 else ["final_af_s1.json", "B6gaf_s1.json",
                                                                                  "B6af_s1.json"]
@@ -318,8 +320,11 @@ class PhysDDG:
         self._FT = FT
         if mode not in ("xtal", "af"):
             raise ValueError("mode must be 'xtal' or 'af'")
-        if weights is None:
+        if weights is None or str(weights) in ("final", "ref"):   # 'ref' = Megascale-only B6g family (ref_*.json)
+            kind = "final" if weights is None else str(weights)
             weights = default_weights(stage or (2 if mode == "af" else 1), mode)
+            if kind == "ref":
+                weights = MODELS / weights.name.replace("final_", "ref_")
         self.model = FT.load_model(weights)
         self.weights_path = str(weights)
         self.stage = int(self.model.get("stage", stage or 1))

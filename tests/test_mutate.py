@@ -187,28 +187,59 @@ def _stored(bench):
     return pd.read_parquet(f) if f.exists() else None
 
 
-@pytest.mark.parametrize("name,bench", [("B6gs1", "megascale"), ("B6g", "megascale"), ("B6gaf", "megascale"),
-                                        ("B6gaf", "domainome")])
-def test_predict_reproduces_shipped_models(name, bench):
+@pytest.mark.parametrize("name,bench,n", [("B6gjs1", "megascale", 2), ("B6gj", "megascale", 2), ("B6gjaf", "megascale", 2),
+                                          ("B6gjs1", "fireprot", 1), ("B6gj", "fireprot", 1),
+                                          ("B6gjaf", "domainome", 1), ("B6gj", "domainome", 1),
+                                          ("B6gs1", "megascale", 1), ("B6g", "megascale", 1)])
+def test_predict_reproduces_shipped_models(name, bench, n):
     """predict() (exact training-time feature path incl. features_extra and the two-stage attenuation) reproduces
-    the fitting agent's stored predictions to 1e-4 on two proteins."""
+    the fitting agent's stored predictions to 1e-4 (joint models = shipped defaults; B6g = Megascale-only refs)."""
     from physddg.predict import MODELS, PhysDDG
     P = _stored(bench)
     if P is None or name not in P or not (MODELS / f"{name}.json").exists():
         pytest.skip(f"{name} predictions / weights not available")
     m = PhysDDG(MODELS / f"{name}.json", device=DEV)          # xtal mode, struct_source from the table
-    for pid in P.protein_id.unique()[:2]:
+    for pid in P.protein_id.unique()[:n]:
         g = P[P.protein_id == pid]
         o = m.predict(g.structure.iloc[0], [f"{c}:{w}{r}{u}" for c, w, r, u in zip(g.chain, g.wt, g.pdb_resnum, g.mut)],
                       struct_source=g.struct_source.iloc[0])
         assert np.nanmax(np.abs(o.ddg.to_numpy() - g[name].to_numpy())) < 1e-4
 
 
+def test_defaults_are_final_models_and_nuisance_ignored(tmp_path):
+    """Defaults resolve to final_*.json (joint models); the nuisance block (FireProt scale/offset, Megascale delta_ref,
+    also inside the AF model's scale_base) never affects predictions."""
+    import json
+    from physddg.predict import MODELS, PhysDDG, default_weights
+    if not (MODELS / "final_stage1.json").exists():
+        pytest.skip("final models not available")
+    assert default_weights(1).name == "final_stage1.json" and default_weights(2).name == "final_stage2.json"
+    assert default_weights(2, "af").name == "final_af.json"
+    for name in ("final_stage1.json", "final_af.json"):
+        m = json.loads((MODELS / name).read_text())
+        bad = json.loads(json.dumps(m))
+        for mm in [bad] + ([bad["scale_base"]] if "scale_base" in bad else []):
+            nu = mm.get("nuisance") or {}
+            for k in ("scale", "offset"):
+                if isinstance(nu.get(k), dict):
+                    nu[k] = {a: 99.0 for a in nu[k]}
+            if isinstance(nu.get("delta_ref"), dict):
+                nu["delta_ref"] = {a: ({x: 50.0 for x in v} if isinstance(v, dict) else 50.0)
+                                   for a, v in nu["delta_ref"].items()}
+        f = tmp_path / name
+        f.write_text(json.dumps(bad))
+        muts = ["E3A", "V4A", "Q5P", "S1S"]
+        a = PhysDDG(MODELS / name, device=DEV).predict(PDB, muts)
+        b = PhysDDG(f, device=DEV).predict(PDB, muts)
+        assert np.array_equal(a.ddg.to_numpy(), b.ddg.to_numpy())
+        assert b.ddg.to_numpy()[3] == 0.0
+
+
 def test_crystal_input_never_attenuated():
     from physddg.predict import MODELS, PhysDDG
-    w = MODELS / "B6gaf.json"
+    w = MODELS / "final_af.json"
     if not w.exists():
-        pytest.skip("B6gaf weights not available")
+        pytest.skip("AF weights not available")
     m = PhysDDG(w, device=DEV, mode="xtal")
     o = m.predict(PDB, ["E3A", "V4A", "Q5P"], terms=True)
     assert (o["c_scale_plddt"] == 0.0).all()

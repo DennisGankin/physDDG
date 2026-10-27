@@ -37,7 +37,7 @@ def main():
     p.add_argument("--crop", help="AF mode: keep only these residues, e.g. A:10-120 (assayed construct / domain)")
     p.add_argument("--no-trim", action="store_true", help="AF mode: do not trim low-pLDDT windows / termini")
     p.add_argument("--stage", type=int, choices=[1, 2])
-    p.add_argument("--weights")
+    p.add_argument("--weights", help="model JSON, or 'final' (default: joint B6gj family) / 'ref' (Megascale-only B6g)")
     p.add_argument("--gpus", default="0")
     p.add_argument("--cpus", type=int, default=4, help="CPU preparation workers per GPU process")
     p.add_argument("--terms", action="store_true", help="add per-term contributions (c_*)")
