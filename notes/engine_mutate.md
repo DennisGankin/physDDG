@@ -304,3 +304,19 @@ a float32 guard (`_float32`).
   **Action for predict.py:** `--weights ref` must become `--weights alt` (or be removed), the default weight
   files are unchanged in *name* but now hold different weights, and the committed example scans in
   `results/examples/` were generated with pre-D23 weights and should be regenerated.
+
+## v7 (2026-10-27): D23 / R-fit5 wiring
+- Shipped family follows the model card again: `final_stage2.json` (B6g) is the **default** (stage 2),
+  `final_stage1.json` (B6gs1) is `--stage 1`, `final_af.json` (B6gaf) is `--mode af`; the joint fits are
+  `alt_multiassay_stage{1,2}.json` / `alt_multiassay_af.json`, selected with `PhysDDG(weights="alt")` /
+  `--weights alt`. The `ref` alias is gone (the hand-made `ref_*.json` files were deleted by the fit agent;
+  everything is now exported by `scripts/57_export_final.py`). `default_weights(stage, mode, family)` is the single
+  place that resolves a model file.
+- Reproduction tests now cover all six shipped files against the stored predictions (Megascale ×2, FireProt,
+  Domainome; ≤ 1e-4) and assert the defaults (`PhysDDG().stage == 2`, `alt` → `alt_multiassay_stage2.json`).
+- Structure type (audit 2, I4): `--structure-type xtal|af|auto`; pLDDT terms only for AF-typed input with real
+  pLDDT; `plddt_missing` flag otherwise. No crystal in 655 benchmark files is detected as AF, all AF models are.
+- Examples regenerated with the shipped weights (`examples/1PSE_*_expected.csv`, stage 2, intercept −0.2817;
+  `results/examples/*`), README accuracy table copied verbatim from the corrected card, `REPORT.md` linked.
+- Verification: full suite 113 passed; fresh clone + venv from `requirements.txt` reproduces both expected files
+  bit-for-bit (max |Δddg| = 0, flags identical) and runs the data-free tests (19 passed, 6 skipped).
