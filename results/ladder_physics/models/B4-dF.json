@@ -1,7 +1,7 @@
 {
  "name": "B4-dF",
- "created": "2026-10-27T00:16:31",
- "git_commit": "03827fb",
+ "created": "2026-10-27T02:08:31",
+ "git_commit": "4c1d4f2",
  "config": {
   "features": [
    "dF",
@@ -27,6 +27,7 @@
   "signs": {
    "dF": 1
   },
+  "fixed": {},
   "l2": 1e-06,
   "intercept": true,
   "sym_pair": false,

@@ -1,7 +1,7 @@
 {
  "name": "B4",
- "created": "2026-10-27T00:14:13",
- "git_commit": "03827fb",
+ "created": "2026-10-27T02:06:17",
+ "git_commit": "4c1d4f2",
  "config": {
   "features": [
    "e_lj_atr",
@@ -60,6 +60,7 @@
    "occ_dvol_loss": 1,
    "ss_broken": 1
   },
+  "fixed": {},
   "l2": 1e-06,
   "intercept": true,
   "sym_pair": false,

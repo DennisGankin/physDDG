@@ -1,0 +1,95 @@
+{
+ "decision": "D23(B): ship the Megascale-only family; joint fits are the multi-assay variant",
+ "rule": "Megascale-val natural per-protein rho (identical held-out rows) > grouped CV on each model's own training set > G6 transfer; ties to fewer fitted terms. No test set was used.",
+ "evidence": [
+  "results/ladder_physics/family_decision.csv",
+  "results/ladder_physics/ss_decision.csv"
+ ],
+ "produced_by": "scripts/57_export_final.py",
+ "models": {
+  "final_stage2": {
+   "source": "B6g",
+   "stage": 2,
+   "scale_kind": null,
+   "n_weights": 20,
+   "weights": 20,
+   "weights_pinned_at_zero": 1,
+   "reference_energies": 20,
+   "intercept": 1,
+   "nested_scale_base": 0,
+   "total_ddG_fitted_at_inference": 41,
+   "effective_ddG_fitted": 40,
+   "also_fitted_but_dropped_at_inference": 0
+  },
+  "final_stage1": {
+   "source": "B6gs1",
+   "stage": 1,
+   "scale_kind": null,
+   "n_weights": 22,
+   "weights": 22,
+   "weights_pinned_at_zero": 1,
+   "reference_energies": 20,
+   "intercept": 1,
+   "nested_scale_base": 0,
+   "total_ddG_fitted_at_inference": 43,
+   "effective_ddG_fitted": 42,
+   "also_fitted_but_dropped_at_inference": 0
+  },
+  "final_af": {
+   "source": "B6gaf",
+   "stage": 2,
+   "scale_kind": "plddt",
+   "n_weights": 21,
+   "weights": 21,
+   "weights_pinned_at_zero": 1,
+   "reference_energies": 20,
+   "intercept": 1,
+   "nested_scale_base": 41,
+   "total_ddG_fitted_at_inference": 83,
+   "effective_ddG_fitted": 82,
+   "also_fitted_but_dropped_at_inference": 0
+  },
+  "alt_multiassay_stage2": {
+   "source": "B6gj",
+   "stage": 2,
+   "scale_kind": null,
+   "n_weights": 19,
+   "weights": 19,
+   "weights_pinned_at_zero": 0,
+   "reference_energies": 20,
+   "intercept": 1,
+   "nested_scale_base": 0,
+   "total_ddG_fitted_at_inference": 40,
+   "effective_ddG_fitted": 40,
+   "also_fitted_but_dropped_at_inference": 22
+  },
+  "alt_multiassay_stage1": {
+   "source": "B6gjs1",
+   "stage": 1,
+   "scale_kind": null,
+   "n_weights": 21,
+   "weights": 21,
+   "weights_pinned_at_zero": 0,
+   "reference_energies": 20,
+   "intercept": 1,
+   "nested_scale_base": 0,
+   "total_ddG_fitted_at_inference": 42,
+   "effective_ddG_fitted": 42,
+   "also_fitted_but_dropped_at_inference": 22
+  },
+  "alt_multiassay_af": {
+   "source": "B6gjaf",
+   "stage": 2,
+   "scale_kind": "plddt",
+   "n_weights": 20,
+   "weights": 20,
+   "weights_pinned_at_zero": 0,
+   "reference_energies": 20,
+   "intercept": 1,
+   "nested_scale_base": 40,
+   "total_ddG_fitted_at_inference": 81,
+   "effective_ddG_fitted": 81,
+   "also_fitted_but_dropped_at_inference": 22
+  }
+ }
+}

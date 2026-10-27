@@ -1,7 +1,7 @@
 {
  "name": "B6g-refzero",
- "created": "2026-10-26T23:58:29",
- "git_commit": "03827fb",
+ "created": "2026-10-27T01:53:18",
+ "git_commit": "4c1d4f2",
  "config": {
   "features": [
    "e_lj_atr",
@@ -62,6 +62,7 @@
    "ncap_pref": 1,
    "helix_dipole": 1
   },
+  "fixed": {},
   "l2": 1e-06,
   "intercept": true,
   "sym_pair": false,

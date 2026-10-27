@@ -288,3 +288,19 @@ a float32 guard (`_float32`).
 - Speed re-run with the final models (shared machine, ~20% run-to-run variation): stage-1 scans 0.9 / 1.9 / 3.6 /
   10.0 s for 59 / 141 / 269 / 597 residues; stage 2 1.8 / 4.0 / 8.2 / 23.7 s; AF mode 5.3 / 12.0 / 22.6 s for
   150 / 298 / 603 residues; Domainome 532k variants on 4 GPUs 71 s (stage 1) / 173 s (stage 2) / 178 s (AF).
+- **R-fit5 (D23: the shipped models changed back to the Megascale-only family — defaults and examples need a
+  re-run).** Audit 2 (C1/C2) showed the joint family's apparent FireProt advantage was an artefact of dropping
+  2 rows, and that the D19/D22 ship decisions were influenced by test looks. Re-deciding on val/CV/G6 only
+  (`results/ladder_physics/{family_decision,ss_decision}.csv`) the Megascale-only family wins, so:
+  - `final_stage2.json` = B6g, `final_stage1.json` = B6gs1, `final_af.json` = B6gaf (as in D19).
+  - The joint fits ship as **`alt_multiassay_stage{1,2}.json` / `alt_multiassay_af.json`** — same schema,
+    use them when the target is an abundance/AF assay rather than ΔΔG.
+  - `ref_stage1/ref_stage2/ref_af.json` are **deleted** (they were hand-made aliases; `final_*` now is that family).
+  - All six files are now produced by **`scripts/57_export_final.py`** (run it after `--stage fit`;
+    `--check` verifies they match their sources and exits non-zero if stale). They carry `shipped_as`,
+    `source_model`, `selection_rule` and an exact `parameter_count` block. Nothing else in the schema changed.
+  - The joint models no longer contain `ss_broken` (dropped by the G6 rule: 8 training rows, undetermined on
+    Megascale, no catalytic-CXXC scope), so `alt_multiassay_*` has 19/21 weights instead of 20/22.
+  **Action for predict.py:** `--weights ref` must become `--weights alt` (or be removed), the default weight
+  files are unchanged in *name* but now hold different weights, and the committed example scans in
+  `results/examples/` were generated with pre-D23 weights and should be regenerated.

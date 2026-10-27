@@ -55,6 +55,7 @@ class FitConfig:
     weighting: str = "clusters"       # dataset total weight: clusters | sqrt_clusters | rows
     within: str = "rows"              # within dataset: rows | clusters | proteins (equal weight per cluster / protein)
     signs: dict = field(default_factory=dict)  # feature -> +1 / -1
+    fixed: dict = field(default_factory=dict)  # feature -> weight held at this value (not fitted; e.g. a prior)
     l2: float = 1e-6                  # tiny ridge on standardised weights
     intercept: bool = True
     sym_pair: bool = False            # symmetric (wt,mut) offset S(a,b) = S(b,a), 190 values (adaptation bias, D15)
@@ -166,6 +167,9 @@ class _Problem:
             bounds[j] = (0.0, None) if s > 0 else (None, 0.0) if s < 0 else (None, None)
             if f in self.inactive:
                 bounds[j] = (0.0, 0.0)
+            if f in cfg.fixed:                      # hold at a prior value (in standardised units)
+                v = float(cfg.fixed[f]) * self.sd_x[k]
+                bounds[j] = (v, v)
         self.bounds = bounds
 
     def _row_weights(self) -> np.ndarray:
@@ -275,6 +279,9 @@ class _Problem:
 
     def init(self):
         th = np.zeros(self.n)
+        for k, f in enumerate(self.cfg.features):
+            if f in self.cfg.fixed:
+                th[self.lay["w"][0].start + k] = float(self.cfg.fixed[f]) * self.sd_x[k]
         if self.other:
             th[self.lay["a"][0]] = 1.0
         if self.cfg.loss == "gauss":

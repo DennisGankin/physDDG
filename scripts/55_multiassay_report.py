@@ -25,8 +25,10 @@ from scipy.stats import spearmanr  # noqa: E402
 from physddg import eval as E  # noqa: E402
 
 OUT = ROOT / "results" / "ladder_physics"
-NBOOT = 200
-MODELS = ["B3+", "B5", "B6g", "B6gs1", "B6gaf", "B6gj", "B6gjs1", "B6gjaf", "B6g-refzero", "B6g-noref", "B6g-floor", "B6x",
+NBOOT = 2000       # audit 2 I6: 200 draws is too few for the marginal cells
+MODELS = ["B3+", "B5", "final_stage2", "final_stage1", "final_af",
+          "alt_multiassay_stage2", "alt_multiassay_stage1", "alt_multiassay_af",
+          "B6g", "B6gs1", "B6gaf", "B6gj", "B6gjs1", "B6gjaf", "B6g-refzero", "B6g-noref", "B6g-floor", "B6x",
           "FoldX", "FoldX-clip", "tmol-refit", "KORPM", "DDGun3D"]
 VIEWS = [("megascale", "domain_origin==natural", "spearman_prot_median", "MS natural"),
          ("megascale", "domain_origin==natural,STRICT", "spearman_prot_median", "MS natural-strict"),
@@ -34,9 +36,11 @@ VIEWS = [("megascale", "domain_origin==natural", "spearman_prot_median", "MS nat
          ("fireprot", "", "pearson", "FireProt"),
          ("s669", "STRICT", "pearson", "S669"), ("s461", "STRICT", "pearson", "S461"),
          ("domainome", "", "spearman_prot_median", "Domainome"),
+         ("domainome", "STRICT", "spearman_prot_median", "Domainome strict"),
          ("domainome", "plddt>=70,x_dist_term>=3", "spearman_prot_median", "Domainome flag-kept"),
-         ("abundance_dms", "", "spearman_prot_median", "abundance_dms")]
-JOINT = {"B6gj", "B6gjs1", "B6gjaf", "B4j", "B5j", "tmol-refit", "KORPM", "DDGun3D"}
+         ("abundance_dms", "", "spearman_prot_median", "abundance_dms (n=7 proteins)")]
+JOINT = {"B6gj", "B6gjs1", "B6gjaf",
+         "alt_multiassay_stage2", "alt_multiassay_stage1", "alt_multiassay_af", "B4j", "B5j", "tmol-refit", "KORPM", "DDGun3D"}
 MS_ONLY = "homolog_in_megascale_train==0"
 BOTH = "homolog_in_megascale_train==0,homolog_in_fireprot_trainval==0"
 
@@ -68,6 +72,10 @@ def load_bench(bench: str) -> pd.DataFrame:
     if cols:
         t = E._norm(t, key)[key + cols].drop_duplicates(key)
         b = E._norm(b, key).merge(t, on=key, how="left")
+    if bench == "abundance_dms" and "homolog_in_megascale_train" not in b:
+        h = pd.read_csv(ROOT / "data" / "processed" / "homology_abundance_dms.csv")
+        b = b.merge(h[["protein_id", "homolog_in_megascale_train", "homolog_in_fireprot_trainval"]],
+                    on="protein_id", how="left")
     if bench == "domainome" and "x_dist_term" not in b:        # distance to the construct terminus (flag rule)
         from physddg import features_extra as X
         st = X.site_table(b.structure.unique(), bench)[["structure", "chain", "pdb_resnum", "dist_term"]]
@@ -82,8 +90,12 @@ def one_cell(bench, expr, metric, label, model, b, have):
     target = "ddg" if b.ddg.notna().any() else "score"
     e = expr.replace("STRICT", strict_for(model)).strip(",")
     d = E.apply_subset(b, e) if e else b
-    keep = [c for c in have if b[c].notna().mean() >= 0.95]
-    d = d[d[keep].notna().all(axis=1)] if keep else d              # identical rows (D17)
+    # D23(A)/audit C1: NEVER intersect the FireProt column -- the 2 rows tmol-refit misses (2TRX CXXC) are
+    # exactly the rows that discriminate the models. Competitors missing rows are marked "(subset)" instead.
+    if bench != "fireprot":
+        keep = [c for c in have if b[c].notna().mean() >= 0.95]
+        d = d[d[keep].notna().all(axis=1)] if keep else d          # matched rows
+    d = d[d[model].notna()]
     if len(d) < 20:
         return [], []
     r = E.evaluate(d, model, target=target)
@@ -91,13 +103,14 @@ def one_cell(bench, expr, metric, label, model, b, have):
     row = {"view": label, "bench": bench, "model": model, "n": r["n"], "n_prot": r["n_proteins"],
            "value": r[metric], "lo": ci.get(metric, (np.nan, np.nan))[0], "hi": ci.get(metric, (np.nan, np.nan))[1],
            "median_prot": r["spearman_prot_median"], "mean_prot": r["spearman_prot_mean"], "metric": metric,
-           "strict_rule": e or "all"}
+           "strict_rule": e or "all", "matched_rows": bench != "fireprot",
+           "coverage": float(b[model].notna().mean())}
     if "FoldX" in d and model != "FoldX":
         a, f = per_protein(d, model, target), per_protein(d, "FoldX", target)
         j = pd.concat([a.rename("a"), f.rename("b")], axis=1).dropna()
         row["win_vs_foldx"], row["n_prot_pairs"] = int((j.a > j.b).sum()), int(len(j))
     deltas = []
-    for ref in ("B5", "B6g", "FoldX", "FoldX-clip"):
+    for ref in ("B5", "final_stage2", "FoldX", "FoldX-clip"):
         if ref in d and ref != model:
             pb = E.paired_bootstrap(d, model, ref, target=target, n_boot=NBOOT)
             if metric in pb:
@@ -129,7 +142,7 @@ def main():
         [m for m in MODELS if m in set(s.model)])
     print(piv[[v[3] for v in VIEWS if v[3] in piv.columns]].round(3).to_string())
     print("\nKey paired deltas (95% cluster-bootstrap CI):")
-    key = dl[dl.model.isin(["B6g", "B6gj", "B6gjs1", "B6gjaf", "B6g-refzero"]) & dl["vs"].isin(["B5", "B6g", "FoldX-clip"])]
+    key = dl[dl.model.isin(["final_stage2", "final_stage1", "final_af", "alt_multiassay_stage2", "B5"]) & dl["vs"].isin(["B5", "B6g", "FoldX-clip"])]
     print(key.round(3).to_string(index=False))
 
 

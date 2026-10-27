@@ -1,7 +1,7 @@
 {
  "name": "B6gaf",
- "created": "2026-10-26T23:59:22",
- "git_commit": "03827fb",
+ "created": "2026-10-27T01:54:12",
+ "git_commit": "4c1d4f2",
  "config": {
   "features": [
    "e_lj_atr",
@@ -64,6 +64,7 @@
    "helix_dipole": 1,
    "scale_plddt": -1
   },
+  "fixed": {},
   "l2": 1e-06,
   "intercept": true,
   "sym_pair": false,
@@ -4449,8 +4450,8 @@
  },
  "scale_base": {
   "name": "model",
-  "created": "2026-10-26T23:59:20",
-  "git_commit": "03827fb",
+  "created": "2026-10-27T01:54:10",
+  "git_commit": "4c1d4f2",
   "config": {
    "features": [
     "e_lj_atr",
@@ -4511,6 +4512,7 @@
     "ncap_pref": 1,
     "helix_dipole": 1
    },
+   "fixed": {},
    "l2": 1e-06,
    "intercept": true,
    "sym_pair": false,

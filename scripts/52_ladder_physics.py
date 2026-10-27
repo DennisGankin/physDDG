@@ -165,6 +165,10 @@ def energy_cols(opts) -> list:
     return cols + ["dTS", "dprior_avg"]
 
 
+SS_DROP_JOINT = True   # D23(A): drop `ss_broken` from JOINT fits (8 training rows, undetermined on Megascale,
+                       # no catalytic-CXXC scope). Chosen on val/CV/G6 only: results/ladder_physics/ss_decision.csv
+
+
 def feature_set(kind: str, opts: dict) -> tuple[list, dict]:
     """kind -> (features, extra FitConfig kwargs). opts['cxxc'] picks the disulfide indicator (D17)."""
     en, refp = energy_cols(opts), (["dref_apolar", "dref_polar"] if opts.get("drefp", True) else [])
@@ -383,6 +387,8 @@ def stage_fit(n_boot):
         if joint:
             d = pd.concat([d, derive(fp, stage, o, caps)], ignore_index=True)
             cfg.ref_nuisance = ("megascale",)
+            if SS_DROP_JOINT and "ss_broken" in cfg.features:     # D23(A)
+                cfg = FT.FitConfig(**{**cfg.__dict__, "features": [f for f in cfg.features if f != "ss_broken"]})
         if name in FLOOR:      # Tobit: rows at the per-domain floor become lower bounds (critique #2 I7ii)
             f = d["flag_mut_floor"].fillna(False).astype(bool) & d["y"].notna()
             d = d.copy()
@@ -417,8 +423,12 @@ def stage_fit(n_boot):
     (OUT / "models" / "caps.json").write_text(json.dumps({str(k): v for k, v in caps_all.items()}))
 
 
+SHIPPED_PREFIX = ("final_", "alt_multiassay_")
+
+
 def load_models():
-    return {p.stem: FT.load_model(p) for p in sorted((OUT / "models").glob("*.json")) if p.stem != "caps"}
+    skip = {"caps", "SHIPPED"}
+    return {p.stem: FT.load_model(p) for p in sorted((OUT / "models").glob("*.json")) if p.stem not in skip}
 
 
 def predict_models(models, df) -> pd.DataFrame:
@@ -985,7 +995,8 @@ def stage_report():
             ("s669", "strict", "pearson", "S669-strict r", True), ("s461", "strict", "pearson", "S461-strict r", True),
             ("domainome", "all", "spearman_prot_median", "Dom ρ_dom", True),
             ("abundance_dms", "all", "spearman_prot_median", "Abund ρ", False)]
-    order = ["B3+", "B4", "B5", "B6gs1", "B6g", "B6gaf", "B6gj", "B6gjs1", "B6gjaf", "B6g-refzero", "B6g-noref", "B6g-floor", "B6x",
+    order = ["B3+", "B4", "B5", "final_stage1", "final_stage2", "final_af",
+             "alt_multiassay_stage1", "alt_multiassay_stage2", "alt_multiassay_af", "B6x", "B6g-refzero", "B6g-noref", "B6g-floor", "B6x",
              "B4-capC", "B4-capC-soft", "B4-noenv", "B4-phys", "B4-dF", "B4-odd", "B4j", "B4j+C",
              "B5-noenv", "B5-phys",
              "B5-dF", "B5-odd", "B5j", "B5j+C", "FoldX", "FoldX-clip", "tmol-refit", "KORPM", "DDGun3D"]
@@ -1081,6 +1092,9 @@ def main():
     warnings.filterwarnings("ignore")
     OUT.mkdir(parents=True, exist_ok=True)
     st = a.stage
+    if st == "all":
+        print("stage all = select -> ablate -> fit -> caps -> b6 -> final -> eval -> antisym -> transfer -> "
+              "g2check -> report; the shipped JSONs are then written by scripts/57_export_final.py", flush=True)
     if st in ("select", "all"):
         stage_select()
     if st in ("ablate", "all"):
@@ -1095,11 +1109,11 @@ def main():
         stage_transfer(a.n_boot)
     if st in ("g2check", "all"):
         stage_g2check()
-    if st in ("caps",):
+    if st in ("caps", "all"):
         stage_caps()
-    if st in ("b6",):
+    if st in ("b6", "all"):
         stage_b6()
-    if st in ("final",):
+    if st in ("final", "all"):
         stage_final()
     if st in ("report", "all"):
         stage_report()

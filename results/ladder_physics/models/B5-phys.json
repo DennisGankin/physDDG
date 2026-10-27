@@ -1,7 +1,7 @@
 {
  "name": "B5-phys",
- "created": "2026-10-27T00:20:04",
- "git_commit": "03827fb",
+ "created": "2026-10-27T02:11:24",
+ "git_commit": "4c1d4f2",
  "config": {
   "features": [
    "e_lj_atr",
@@ -43,6 +43,7 @@
    "dTS": -1,
    "dprior_avg": 1
   },
+  "fixed": {},
   "l2": 1e-06,
   "intercept": true,
   "sym_pair": false,
