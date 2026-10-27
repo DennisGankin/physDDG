@@ -270,3 +270,21 @@ a float32 guard (`_float32`).
   2. `final_af.json` is attenuated (`scale_kind: "plddt"`, embedded `scale_base`) — same two-stage rule as before
      (R-fit3). Its `scale_base` is itself a joint model, so rule 1 applies to the nested model as well.
   Everything else (feature names, `derive_opts`, `stage`, caps) is identical to the D19 release.
+
+## v6 (2026-10-27): shipped joint models, packaging smoke test
+- Defaults (R-fit4 / D22): `physddg.predict.default_weights` → `final_stage1.json` (B6gjs1, stage 1),
+  `final_stage2.json` (B6gj, `--stage 2`), `final_af.json` (B6gjaf, `--mode af`). `PhysDDG(weights="ref")` /
+  CLI `--weights ref` selects the Megascale-only `ref_*.json`. Prediction goes through `fit.predict`, which ignores
+  the `nuisance` block entirely; a test corrupts `nuisance` (FireProt scale/offset, Megascale δ_ref, also inside the
+  AF model's nested `scale_base`) and asserts the predictions are bit-identical.
+- Reproduction tests: joint models vs the fit agent's stored predictions, ≤ 1e-4 on 2 Megascale + 1 FireProt +
+  1 Domainome protein each (B6gjs1 / B6gj / B6gjaf); the Megascale-only B6g family is still covered.
+- CPU fallback: `PhysDDG(device="cuda")` falls back to CPU with a warning when no GPU is present.
+- Fresh-clone smoke test (2026-10-27): `git clone` → `uv venv` + `requirements.txt` (35 s) → `scripts/physddg
+  predict` on `examples/1PSE.pdb` reproduces `examples/1PSE_{mutations,scan}_expected.csv` **bit-for-bit**;
+  `pytest tests/test_geometry.py tests/test_features_extra.py` passes with no downloaded data (19 passed,
+  6 skipped). Clone size 69 MB. External requirements documented in README "Reproducing results": internet, the
+  read-only mirrors, mmseqs2, and FoldX/KORPM/DDGun3D for the competitor comparisons only.
+- Speed re-run with the final models (shared machine, ~20% run-to-run variation): stage-1 scans 0.9 / 1.9 / 3.6 /
+  10.0 s for 59 / 141 / 269 / 597 residues; stage 2 1.8 / 4.0 / 8.2 / 23.7 s; AF mode 5.3 / 12.0 / 22.6 s for
+  150 / 298 / 603 residues; Domainome 532k variants on 4 GPUs 71 s (stage 1) / 173 s (stage 2) / 178 s (AF).
