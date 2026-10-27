@@ -187,10 +187,14 @@ def _stored(bench):
     return pd.read_parquet(f) if f.exists() else None
 
 
-@pytest.mark.parametrize("name,bench,n", [("B6gjs1", "megascale", 2), ("B6gj", "megascale", 2), ("B6gjaf", "megascale", 2),
-                                          ("B6gjs1", "fireprot", 1), ("B6gj", "fireprot", 1),
-                                          ("B6gjaf", "domainome", 1), ("B6gj", "domainome", 1),
-                                          ("B6gs1", "megascale", 1), ("B6g", "megascale", 1)])
+@pytest.mark.parametrize("name,bench,n", [("final_stage1", "megascale", 2), ("final_stage2", "megascale", 2),
+                                          ("final_af", "megascale", 2), ("final_stage2", "fireprot", 1),
+                                          ("final_stage1", "fireprot", 1), ("final_af", "domainome", 1),
+                                          ("final_stage2", "domainome", 1),
+                                          ("alt_multiassay_stage1", "megascale", 1),
+                                          ("alt_multiassay_stage2", "megascale", 1),
+                                          ("alt_multiassay_stage2", "fireprot", 1),
+                                          ("alt_multiassay_af", "domainome", 1)])
 def test_predict_reproduces_shipped_models(name, bench, n):
     """predict() (exact training-time feature path incl. features_extra and the two-stage attenuation) reproduces
     the fitting agent's stored predictions to 1e-4 (joint models = shipped defaults; B6g = Megascale-only refs)."""
@@ -207,15 +211,20 @@ def test_predict_reproduces_shipped_models(name, bench, n):
 
 
 def test_defaults_are_final_models_and_nuisance_ignored(tmp_path):
-    """Defaults resolve to final_*.json (joint models); the nuisance block (FireProt scale/offset, Megascale delta_ref,
-    also inside the AF model's scale_base) never affects predictions."""
+    """Defaults resolve to the shipped final_*.json of the model card (stage 2 unless --stage 1), 'alt' to the
+    multi-assay joint fits; the nuisance block of a joint model (FireProt scale/offset, Megascale delta_ref, also
+    inside the AF model's scale_base) never affects predictions."""
     import json
     from physddg.predict import MODELS, PhysDDG, default_weights
     if not (MODELS / "final_stage1.json").exists():
         pytest.skip("final models not available")
     assert default_weights(1).name == "final_stage1.json" and default_weights(2).name == "final_stage2.json"
     assert default_weights(2, "af").name == "final_af.json"
-    for name in ("final_stage1.json", "final_af.json"):
+    assert default_weights(2, family="alt").name == "alt_multiassay_stage2.json"
+    assert default_weights(2, "af", family="alt").name == "alt_multiassay_af.json"
+    assert PhysDDG(device=DEV).stage == 2                                   # default is stage 2 (model card)
+    assert Path(PhysDDG("alt", device=DEV).weights_path).name == "alt_multiassay_stage2.json"
+    for name in ("alt_multiassay_stage1.json", "alt_multiassay_af.json"):
         m = json.loads((MODELS / name).read_text())
         bad = json.loads(json.dumps(m))
         for mm in [bad] + ([bad["scale_base"]] if "scale_base" in bad else []):

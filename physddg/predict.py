@@ -311,20 +311,19 @@ def resolve_structure_type(structure_type: str | None, struct_source: str | None
     return ("af" if mode == "af" else "xtal"), f"mode={mode}"
 
 
-def default_weights(stage: int, mode: str = "xtal") -> Path:
-    """Shipped model for (stage, mode): final_*.json (D22: joint Megascale+FireProt fits B6gjs1 / B6gj / B6gjaf; their
-    `nuisance` blocks are never applied, fit.predict ignores them) if present, else the B6g family. The Megascale-only
-    models are ref_*.json (`PhysDDG(weights='ref')`, CLI `--weights ref`)."""
-    if mode == "af":
-        cands = ["final_af.json", "B6gaf.json", "B6af.json"] if stage == 2 else ["final_af_s1.json", "B6gaf_s1.json",
-                                                                                 "B6af_s1.json"]
-    else:
-        cands = ["final_stage2.json", "B6g.json", "B6.json", "B5.json"] if stage == 2 else \
-            ["final_stage1.json", "B6gs1.json", "B6s1.json", "B4.json"]
-    for c in cands:
-        if (MODELS / c).exists():
-            return MODELS / c
-    raise FileNotFoundError(f"no model for stage {stage}, mode {mode} in {MODELS}")
+def default_weights(stage: int, mode: str = "xtal", family: str = "final") -> Path:
+    """Shipped model for (stage, mode), as in the model card (notes/ladder_physics.md, D23): family 'final' =
+    final_stage2.json (B6g, default) / final_stage1.json (B6gs1, fast) / final_af.json (B6gaf, AF models);
+    family 'alt' = the multi-assay joint fits alt_multiassay_stage{1,2}.json / alt_multiassay_af.json, whose
+    `nuisance` blocks are never applied (fit.predict ignores them). All produced by scripts/57_export_final.py."""
+    if family not in ("final", "alt"):
+        raise ValueError("family must be 'final' or 'alt'")
+    pre = "final_" if family == "final" else "alt_multiassay_"
+    name = f"{pre}af.json" if mode == "af" else f"{pre}stage{stage}.json"
+    f = MODELS / name
+    if not f.exists():
+        raise FileNotFoundError(f"{f} missing (run scripts/57_export_final.py)")
+    return f
 
 
 AF_TRIM = dict(below=50.0, window=10, termini_below=70.0, packed_exempt=True)   # D18 (MAVISp-style)
@@ -380,11 +379,9 @@ class PhysDDG:
         self._FT = FT
         if mode not in ("xtal", "af"):
             raise ValueError("mode must be 'xtal' or 'af'")
-        if weights is None or str(weights) in ("final", "ref"):   # 'ref' = Megascale-only B6g family (ref_*.json)
-            kind = "final" if weights is None else str(weights)
-            weights = default_weights(stage or (2 if mode == "af" else 1), mode)
-            if kind == "ref":
-                weights = MODELS / weights.name.replace("final_", "ref_")
+        if weights is None or str(weights) in ("final", "alt"):   # 'alt' = multi-assay joint fits
+            family = "final" if weights is None else str(weights)
+            weights = default_weights(stage or 2, mode, family)          # default = stage 2 (model card)
         self.model = FT.load_model(weights)
         self.weights_path = str(weights)
         self.stage = int(self.model.get("stage", stage or 1))

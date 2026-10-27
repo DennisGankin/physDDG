@@ -6,9 +6,10 @@
                   [--terms] --out preds.csv
   physddg predict --table variants.csv --gpus 0,1,2,3 --out preds.csv   (columns: structure, chain, pdb_resnum, wt, mut)
 
-ddg in kcal/mol, positive = destabilising. Weights: physddg.predict.default_weights (final_* files, else B6g family):
-stage 1 (default, fast) = fixed environment; stage 2 = flexible neighbours; --mode af (D18) = construct crop (optional),
-MAVISp-style trim, stage 2, pLDDT attenuation, AF flags and a `withheld` column.
+ddg in kcal/mol, positive = destabilising. Weights (model card, notes/ladder_physics.md): final_stage2 (default,
+stage 2 = flexible neighbours), final_stage1 (--stage 1, fast, fixed environment), final_af (--mode af: optional
+construct crop, MAVISp-style trim, stage 2, pLDDT attenuation, AF flags and a `withheld` column); --weights alt
+selects the multi-assay joint fits.
 """
 import os
 
@@ -39,7 +40,7 @@ def main():
     p.add_argument("--structure-type", choices=["xtal", "af", "auto"],
                    help="input type for the pLDDT terms (default: af with --mode af, else xtal; auto = detect)")
     p.add_argument("--stage", type=int, choices=[1, 2])
-    p.add_argument("--weights", help="model JSON, or 'final' (default: joint B6gj family) / 'ref' (Megascale-only B6g)")
+    p.add_argument("--weights", help="model JSON, or 'final' (default: B6g family) / 'alt' (multi-assay joint fits)")
     p.add_argument("--gpus", default="0")
     p.add_argument("--cpus", type=int, default=4, help="CPU preparation workers per GPU process")
     p.add_argument("--terms", action="store_true", help="add per-term contributions (c_*)")
@@ -47,7 +48,7 @@ def main():
     a = ap.parse_args()
     import pandas as pd
     from physddg import predict as P
-    stage = a.stage or (2 if a.mode == "af" else 1)
+    stage = a.stage or 2                   # model card: default = stage 2
     gpus = [int(x) for x in a.gpus.split(",") if x != ""]
     t0 = time.time()
     if a.table:
