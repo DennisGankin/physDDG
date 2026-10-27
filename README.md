@@ -6,15 +6,18 @@ stability (ΔΔG, kcal/mol, **positive = destabilising**). No deep learning: a G
 library with Boltzmann averaging over rotamers, optional mean-field repacking of the neighbouring side chains, PDB
 statistical potentials, and a linear read-out fitted to ΔΔG (Megascale-train + FireProt-train).
 
-Numbers fitted to ΔΔG, counted from the shipped JSONs (weights + 20 reference energies + intercept):
-**43** for `final_stage1.json` (22 weights), **41** for `final_stage2.json` (20 weights) and **83** for
-`final_af.json` (21 weights + 20 + 1, plus its complete nested base model `scale_base`, 41 more, evaluated at
-inference). The joint fits also estimated 22 nuisance parameters from ΔΔG (FireProt scale and offset, 20 Megascale
-δ_ref); they are dropped at inference but were fitted. In addition the model uses tables estimated from structures,
+Numbers fitted to ΔΔG, counted from the shipped JSONs by `scripts/57_export_final.py`
+(`results/ladder_physics/models/SHIPPED.json`): **41** for `final_stage2.json` (20 weights + 20 reference
+energies + intercept; one weight pinned at 0 → 40 effective), **43** for `final_stage1.json` (22 weights) and
+**83** for `final_af.json` (21 + 20 + 1 plus its complete nested base model `scale_base`, 41 more, evaluated at
+inference). The multi-assay variants are 40 / 42 / 81 and additionally estimated 22 nuisance numbers from ΔΔG
+(FireProt scale and offset, 20 Megascale δ_ref) that are fitted but never applied at inference. In addition the
+model uses tables estimated from structures,
 never from ΔΔG (rotamer library, Ramachandran maps, environment and N-cap potentials), and ~15 frozen
 CHARMM19/EEF1 constants with literature provenance (`physddg/params.py`). Torch is used only as a GPU array library.
 
-Full model card (terms, training data, results, weaknesses): `notes/ladder_physics.md`. Engine internals:
+Project write-up: `REPORT.md`. Full model card (terms, training data, results, weaknesses):
+`notes/ladder_physics.md`. Engine internals:
 `notes/engine_{geometry,energy,mutate}.md`; AlphaFold handling: `notes/af_mode.md`; research log: `RESEARCH_TREE.md`.
 
 ## Install
@@ -36,11 +39,11 @@ scripts/physddg predict --table variants.csv --gpus 0,1,2,3 --out preds.csv   # 
 Python:
 ```python
 from physddg.predict import PhysDDG
-m = PhysDDG()                       # stage 1 (fast default): results/ladder_physics/models/final_stage1.json
+m = PhysDDG()                       # default: results/ladder_physics/models/final_stage2.json (stage 2)
 df = m.predict("1abc.pdb", ["A12G", "L45P"], terms=True)
-m2 = PhysDDG(stage=2)               # stage 2 (most accurate): final_stage2.json
+m2 = PhysDDG(stage=1)               # fast: final_stage1.json
 m3 = PhysDDG(mode="af")             # AF mode: final_af.json + the D18 treatments; m3.predict(f, ..., crop="A:30-140")
-m4 = PhysDDG(weights="ref")         # Megascale-only reference fits (ref_stage1/2/af.json); or weights="model.json"
+m4 = PhysDDG(weights="alt")         # multi-assay joint fits (alt_multiassay_*.json); or weights="model.json"
 ```
 Mutation syntax: `<wt><resnum>[icode]<mut>`, optionally prefixed by the chain (`B:L45P`); residue numbers are the
 author numbering of the file. Output columns: `ddg`, `site_found`, `wt_match`, `flags`, and with `--terms` the
@@ -53,50 +56,72 @@ AF mode adds `low_plddt` (< 70), `very_low_plddt` (< 50), `near_low_plddt`, `ter
 `exposed_hydrophobic_patch` (missing partner), `metal_site` (Cys/His cluster), `site_trimmed` (the site lies in a
 trimmed low-confidence segment; scored on the untrimmed model) and a boolean column `withheld`
 (pLDDT < 70 ∪ terminal ∪ exposed hydrophobic patch ∪ metal site; recommended: do not use these numbers).
-Weights are chosen by `physddg.predict.default_weights`; `--weights ref` selects the Megascale-only fits and
+Weights are chosen by `physddg.predict.default_weights`; `--weights alt` selects the multi-assay joint fits and
 `--weights path.json` any other model. The JSON schema and feature contract are in
 `results/ladder_physics/models/README.md`. The `nuisance` block of a model (per-assay scale/offset, Megascale
 δ_ref) is **never** applied at inference.
 
 ## Models and modes
-Shipped weights are the joint Megascale-train + FireProt-train fits (D22); `ref_*.json` are the Megascale-only
-counterparts, kept for comparison. Numbers below are copied from the model card in `notes/ladder_physics.md`.
+Shipped weights follow the model card (`notes/ladder_physics.md`, D23); all files are written by
+`scripts/57_export_final.py` (`--check` reports staleness).
 
-| file (`results/ladder_physics/models/`) | fit | what is computed | use |
-|---|---|---|---|
-| `final_stage1.json` (B6gjs1) | joint | stage 1: Boltzmann over the site's library rotamers in the fixed WT environment, + PDB statistics, N-cap, helix dipole | **default here**; saturation scans / proteome scale (2–2.5× faster than stage 2 end to end, see Speed) |
-| `final_stage2.json` (B6gj) | joint | stage 1 + mean-field repacking of the ≤ 16 side chains within 6 Å (identical candidate sets for WT and mutant) | best accuracy on crystal or AF input |
-| `final_af.json` (B6gjaf) | joint | stage 2 + pLDDT attenuation, with the D18 treatments below | **only** where B-factors are pLDDT (AlphaFold models) |
-| `ref_stage1/2/af.json` (B6g family) | Megascale-only | same forms | ablation / comparison |
+| file (`results/ladder_physics/models/`) | = | fit | what is computed | use |
+|---|---|---|---|---|
+| `final_stage2.json` | B6g | Megascale-only | stage 2: stage 1 + mean-field repacking of the ≤ 16 side chains within 6 Å (identical candidate sets for WT and mutant) | **default** (`--stage 2`, the default) |
+| `final_stage1.json` | B6gs1 | Megascale-only | stage 1: Boltzmann over the site's library rotamers in the fixed WT environment, + PDB statistics, N-cap, helix dipole | `--stage 1`: large scans, ~2× faster |
+| `final_af.json` | B6gaf | Megascale-only | stage 2 + pLDDT attenuation, with the D18 treatments below | `--mode af`: AlphaFold models only (B-factor = pLDDT) |
+| `alt_multiassay_stage{1,2}.json`, `alt_multiassay_af.json` | B6gj* | joint Megascale+FireProt | same forms | `--weights alt`: FireProt-like, abundance or AF assays |
 
 `--mode af` (D18) additionally: optional construct crop (`--crop A:30-140`, equivalent to running on a construct
 file of that range) → MAVISp-style trim of low-pLDDT 10-residue windows (< 50) and termini (< 70), packed segments
 exempt → stage 2 with the AF side chains kept outside the 6 Å shell → pLDDT attenuation → AF flags and `withheld`.
-pLDDT attenuation is applied only in AF mode; crystal input never uses it, even with AF weights.
+
+Structure type decides whether any pLDDT term is used: `--structure-type xtal|af|auto` (default: `af` with
+`--mode af`, else `xtal`; `auto` reads the header, an `AF-*-model_v*` file name, then per-residue-constant
+B-factors in [0, 100]). Crystal input is never attenuated, even with AF weights; an AF model whose B-factor column
+carries no pLDDT is scored without pLDDT terms and flagged `plddt_missing`.
 
 The site is always modelled from library rotamers (the WT side chain at the mutated site is never reused), so WT and
 mutant go through the same code path. The backbone is fixed.
 
-### Accuracy (copied from the model card, `notes/ladder_physics.md`; identical rows per column; strict = no homologue
+### Accuracy (table copied verbatim from the model card, `notes/ladder_physics.md`; read the card for the CIs,
+the known weaknesses and the selection history, and `REPORT.md` for the project-level write-up)
+Per-model strictness (a model trained on FireProt also excludes FireProt-trainval homologues), so n differs
+between families in the S669/S461/Domainome-strict columns; the card also gives a matched-row table.
+Megascale/Domainome/abundance = per-protein median ρ; FireProt/S669/S461 = Pearson.
 
-**Under revision (audit 2, D23):** the model card is being corrected (FireProt column on the full row set, "identical rows per column" does not hold for S669-str, S461-str and the Domainome DDGun3D cell, test evaluations used during selection). This table will be replaced verbatim by the corrected card's table; until then treat it as provisional.
-of any training set that model saw; Megascale/Domainome/abundance = per-protein median ρ, FireProt/S669/S461 = Pearson)
-| model | MS nat | MS nat-strict | MS all | FireProt | S669-str | S461-str | Domainome | Dom flag-kept | abundance |
-|---|---|---|---|---|---|---|---|---|---|
-| **B6gj** (`final_stage2`) | 0.692 | 0.695 | 0.682 | 0.482 | 0.344 | 0.568 | 0.451 | 0.478 | 0.482 |
-| **B6gjs1** (`final_stage1`) | 0.676 | 0.690 | 0.674 | 0.475 | **0.351** | **0.579** | 0.450 | 0.477 | 0.478 |
-| **B6gjaf** (`final_af`) | **0.700** | 0.703 | 0.692 | 0.481 | 0.343 | 0.568 | **0.459** | **0.481** | **0.491** |
-| B6g (`ref_stage2`, Megascale-only) | 0.692 | 0.702 | 0.692 | 0.464 | 0.336 | 0.552 | 0.418 | 0.449 | 0.469 |
-| FoldX 5.1 raw / clipped | 0.629 | 0.640 | 0.633 | 0.417 / 0.423 | – | – | 0.430 | 0.458 | – |
-| tmol-refit / KORPM / DDGun3D | 0.622 / 0.500 / 0.516 | | | 0.486 / 0.411 / 0.529 | – / 0.194 / 0.347 | – / 0.543 / 0.552 | – / 0.302 / 0.282 | | |
+| model | MS nat | MS nat-str | MS all | FireProt (347) | S669-str | S461-str | Domainome | Dom strict | Dom flag-kept | abundance |
+|---|---|---|---|---|---|---|---|---|---|---|
+| B3+ (no engine) | 0.648 | 0.649 | 0.649 | 0.432 | 0.339 | 0.570 | 0.389 | 0.369 | 0.407 | 0.446 |
+| B5 (previous rung) | 0.687 | 0.697 | 0.685 | 0.456 | 0.334 | 0.559 | 0.412 | 0.386 | 0.440 | 0.469 |
+| **final_stage2** | 0.692 | 0.702 | 0.692 | 0.451 | 0.336 | 0.552 | 0.418 | 0.391 | 0.449 | 0.469 |
+| **final_stage1** | 0.678 | 0.690 | 0.684 | 0.444 | 0.346 | 0.572 | 0.414 | 0.389 | 0.450 | 0.468 |
+| **final_af** | 0.699 | 0.704 | 0.699 | 0.451 | 0.336 | 0.552 | 0.425 | 0.397 | 0.454 | 0.478 |
+| alt_multiassay_stage2 | 0.690 | 0.698 | 0.684 | **0.478** | 0.319 | 0.531 | 0.450 | 0.403 | 0.480 | 0.484 |
+| alt_multiassay_stage1 | 0.678 | 0.692 | 0.675 | 0.471 | 0.330 | 0.550 | 0.448 | 0.405 | 0.475 | 0.480 |
+| alt_multiassay_af | 0.703 | 0.706 | 0.692 | 0.478 | 0.319 | 0.531 | 0.457 | 0.410 | 0.482 | 0.492 |
+| FoldX raw / clipped | 0.629 | 0.640 | 0.633 | 0.411 / 0.417 *(subset, 341)* | – | – | 0.430 | 0.385 | 0.458 | – |
+| tmol-refit | 0.622 | 0.637 | 0.626 | 0.477 *(subset, 344)* | – | – | – | – | – | – |
+| KORPM | 0.500 | 0.513 | 0.533 | 0.397 | 0.194 | 0.543 | 0.302 | 0.274 | 0.315 | – |
+| DDGun3D | 0.516 | 0.475 | 0.502 | **0.488** | 0.347 | 0.552 | *(subset, 28 dom)* | *(subset)* | *(subset)* | – |
 
-Headline, Megascale-test natural (21 proteins, 22,159 variants): B6gj − FoldX-clipped = **+0.063 [+0.008, +0.095]**
-per-protein ρ; Pearson 0.694 vs 0.596, RMSE 0.79 vs 1.85 kcal/mol. Known weaknesses, all spelled out in the model
-card: not antisymmetric (Ssym r 0.23–0.25 vs 0.88 for KORPM); stabilising mutations precision@5 0.15–0.23 (FoldX
-0.219); ρ ≈ 0 below pLDDT 70 — flag and withhold rather than predict; buried small→large 0.49 vs FoldX 0.55;
-S669-strict 0.344 is parity with DDGun3D, not a win; Megascale is AF2 models, so structure source is confounded
-with assay; the B6 terms were selected with repeated test-set evaluations (audit 2 counts ≥ 12), so
-B5 → B6g/B6gj test deltas carry selection optimism.
+n per column: MS nat 22,159/21 proteins · MS nat-strict 15,733/14 · MS all 28,172/28 · FireProt 347/27
+(FoldX 341/25, tmol 344/27) · S669-strict 488/87 Megascale-only, 470/82 joint · S461-strict 290/43 vs 285/42 ·
+Domainome 509,388/493 · Dom strict 358,755/347 vs 323,643/320 joint · Dom flag-kept 441,283/493 ·
+abundance 37,947/**7 proteins — a median over 7 is not interpretable**, quoted for completeness only.
+
+**The headline comparison.** Megascale-test natural, 21 proteins, 22,159 variants, identical rows and
+identical structures: **final_stage2 − FoldX-clipped = +0.063 [+0.006, +0.120]** per-protein ρ; Pearson 0.701
+vs 0.596; RMSE 0.78 vs 1.85 kcal/mol; better on **19 of 21** proteins. Mean per-protein ρ 0.702 vs median
+0.692. Independently reproduced by audit 2 at 2,000 draws.
+
+Known weaknesses, all from the card: not antisymmetric (Ssym r 0.23–0.25 against KORPM 0.88); stabilising
+mutations precision@5 0.15–0.23 against FoldX 0.219; ρ ≈ 0 below pLDDT 70 — flag and withhold rather than predict;
+buried small→large 0.49 against FoldX 0.55; S669-strict parity with DDGun3D, not a win; Megascale is AF2 models, so
+structure source is confounded with assay; the shipped default is not distinguishable from the previous rung
+(+0.005 [−0.004, +0.019]) and the B6 term set was chosen with repeated test-set evaluations (audit 2 counts ≥ 12),
+so those test deltas carry selection optimism; the abundance column is a median over 7 proteins and is not
+interpretable.
 
 ## Limits (what PhysDDG does not do)
 - **Ligands, metals, cofactors, nucleic acids** are ignored (HETATM groups are dropped; `hetatm_5A` flags affected sites).
@@ -141,11 +166,8 @@ construct) and `results/examples/AF-P20486_yeast_scan_af.csv` (full AF model wit
 
 ## Reproducing results
 Results come from numbered scripts; run them as `PYTHONPATH=. .venv/bin/python scripts/<script>` (the `*.sh`
-ones with bash). **Exceptions** (audit 2, I8): `results/ladder_physics/models/final_{stage1,stage2,af}.json` and
-`ref_*.json` are aliases of B6gjs1 / B6gj / B6gjaf and B6gs1 / B6g / B6gaf (identical weights plus
-`alias_of` / `release` keys) written by hand at release time; the underlying `B6g*.json` models are produced by
-`52_ladder_physics.py --stage fit`. `results/ladder_physics/final_selection_ablation.csv` needs `--stage final`,
-which `--stage all` does not run. The fitting lead is scripting both (R-fit5). **Only the code, the fitted models,
+ones with bash). The shipped model files (`final_*.json`, `alt_multiassay_*.json`, `SHIPPED.json`) are exported
+from the fitted `B6g*.json` by `scripts/57_export_final.py`; `--check` reports staleness (audit 2, I8, fixed). **Only the code, the fitted models,
 the PDB-derived tables (`physddg/data/*.npz`, 6 MB) and `examples/` are in the repository.** Everything else is
 regenerated: `data/raw` (≈ 117 GB of downloads), `data/processed` (0.4 GB), `data/structures` (0.5 GB),
 `data/features` (11 GB) and the large prediction tables are git-ignored. External requirements that are *not*
@@ -166,7 +188,7 @@ Order and approximate wall-clock times on this machine (64 CPUs, 4 × RTX 4090):
 | 6 | `50_features_simple.py` | structure-statistics features for all tables | ~10 min (48 CPUs) |
 | 6b | `53_ncap_stats.py` | PDB-derived N-cap potential → `physddg/data/ncap_pref.json` (needed by the B6 terms) | ~2 min |
 | 7 | `55_phys_features.py --stage 1` then `--stage 2` (optionally `--variants capA capB capC`) | engine features for all 9 tables → `data/features/phys_s{1,2}_*.parquet` | ~5 min + ~15 min per variant (2 GPUs) |
-| 9 | `51_baseline_ladder.py`, then `52_ladder_physics.py --stage all`, `--stage fit`, `--stage final` | baselines B0–B3+, then selection, fits, ablations, gates and the final models → `results/ladder_physics/models/*.json` (aliases: see Exceptions) | ~1–2 h |
+| 9 | `51_baseline_ladder.py`, then `52_ladder_physics.py --stage all`, `--stage fit`, `--stage final`, then `57_export_final.py` | baselines B0–B3+, then selection, fits, ablations, gates and the final models → `results/ladder_physics/models/*.json` + the shipped exports | ~1–2 h |
 | 9b | `55_multiassay_report.py` | model-card headline tables (`multiassay_summary.csv`, `multiassay_deltas.csv`); note the shared `55_` prefix with `55_phys_features.py` (step 7) | ~10 min |
 | 9c | `54_doubles_additivity.py` | additivity probe on Megascale double mutants | ~10 min |
 | 10 | `30`–`32`, `60`–`61`, `70`–`74` | evaluation harness, FoldX/trivial baselines, tmol, KORPM, DDGun3D | hours (FoldX and DDGun dominate; external binaries) |
