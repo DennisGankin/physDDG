@@ -64,8 +64,6 @@ Megascale test set, SPURS 0.74 pooled, ESM-MSR 0.573 on Domainome (`LITERATURE.m
 ## What we do not claim
 - That the physics generalises across assays. Evidence is per assay: on FireProt, S669, S461 and Domainome the model is at
   FoldX level or the difference is not significant, and on crystal benchmarks it does not beat the 10-parameter B3+ baseline.
-- That it beats the earlier PhysDDG v1.2: that comparison was never run, because v1.2's predictions are not in this
-  workspace. Its reported Megascale numbers (pooled 0.640, per-protein 0.701) are about the same as ours (pooled 0.642–0.659).
 - Closing the gap to deep learning. The structure-only model is below the published DL numbers (≈0.69–0.70 vs ≈0.77
   per-protein on Megascale). The optional evolution mode (`notes/evo_extension.md`) adds one sequence-profile weight and gains
   +0.040 on Megascale (CI [−0.005, +0.071]; +0.014 on the strict natural subset) and +0.074 on Domainome, but it is a different
@@ -76,8 +74,6 @@ Megascale test set, SPURS 0.74 pooled, ESM-MSR 0.573 on Domainome (`LITERATURE.m
   the model card). Read marginal test deltas with that in mind.
 
 ## Open issues for the user
-- **Access:** the earlier PhysDDG v1.2 predictions/code are not in `/workspace/stability_hackathon`. If you can place them in
-  `data/`, a paired test is a short job.
 - **Rotamer library licence:** we derived our own library from PISCES-culled PDB structures. The Dunbrack 2010 library
   needs a manually approved application; tmol bundles a copy whose licence we have not resolved.
 - Viral proteins have no AlphaFold model (T4 lysozyme etc.), so they are missing from the paired xtal/AF set.

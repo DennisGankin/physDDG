@@ -197,6 +197,5 @@ See [CITATION.cff](CITATION.cff). Please also cite the datasets and the tools li
 
 ## Licence
 
-Code: MIT ([LICENSE](LICENSE)). Documentation and result tables: CC BY 4.0
-([LICENSE-DATA](LICENSE-DATA)). Third-party data and parameters keep their own terms; see
-[THIRD_PARTY.md](THIRD_PARTY.md).
+MIT ([LICENSE](LICENSE)) for everything in this repository that is ours: code, documentation and result tables.
+Third-party data and parameters keep their own terms; see [THIRD_PARTY.md](THIRD_PARTY.md).

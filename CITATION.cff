@@ -6,7 +6,7 @@ date-released: 2026-10-27
 license: MIT
 type: software
 authors:
-  - name: "<AUTHOR PLACEHOLDER>"
+  - name: "PhysDDG contributors"
 abstract: >-
   Structure-based predictor of single-substitution folding stability changes (ddG, positive = destabilising)
   that uses force-field-style energy terms, a PDB-derived rotamer library and a small linear model; no deep
@@ -17,7 +17,3 @@ keywords:
   - ddG
   - mutation effect prediction
   - AlphaFold
-# identifiers:            # add the Zenodo DOI after the first release
-#   - type: doi
-#     value: "<DOI PLACEHOLDER>"
-# repository-code: "<REPOSITORY URL PLACEHOLDER>"

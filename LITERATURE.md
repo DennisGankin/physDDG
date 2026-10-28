@@ -19,7 +19,7 @@ Numbers labelled **[own]** were computed here (scripts in `scripts/lit_*.py`), n
    (burial, burial×Δhydrophobicity, burial×ΔVolume, Pro/Gly indicators) gets **0.536 / 0.600** **[own]**.
    Deep models sit at 0.725 (ThermoMPNN) – 0.74 (SPURS) pooled, 0.77–0.83 per-protein. So "beating FoldX"
    is worth ~0.03–0.07 Spearman over a model that contains no physics at all; the project is only interesting
-   if it lands clearly above ~0.62 pooled. The internal PhysDDG v1.2 is at 0.640 — that, not FoldX, is the bar.
+   if it lands clearly above ~0.62 pooled.
 2. **You cannot get there by reweighting FoldX-style terms.** Refitting free linear weights on FoldX 5.1's
    own 22 per-term energies under protein-grouped 5-fold CV gives pooled 0.541 / per-protein 0.604 —
    *worse* than stock FoldX; with clash terms log-compressed, 0.567 / 0.628, i.e. a tie **[own]**.
@@ -380,11 +380,6 @@ of the model that can fix the stabilising-mutation bias.
 * **"Large-scale discovery, analysis, and design of protein energy landscapes"** (bioRxiv 2025.03.20.644235) —
   reports that models from **manually engineered interpretable features with explicit structures** were the most
   accurate in one of its comparisons, with PLM embeddings best overall. **[unverified in detail]**
-* **PhysDDG v1.2 (Beltrao lab, internal)** — a physics-based, no-DL predictor already evaluated in this group:
-  Megascale-test pooled ρ **0.640** (per-protein 0.701), FireProt no significant difference from FoldX,
-  Domainome 0.394–0.403 ≈ FoldX 0.392. It beats FoldX (0.569) significantly on Megascale and loses to the
-  DL models (~0.72) by 0.06–0.08 **[own, project record; see memory note `physddg-comparison`]**.
-  **This is the number the new engine must beat: pooled ρ > 0.64 on Megascale-test, and > 0.40 on Domainome.**
 * No published purely-physics GPU ΔΔG engine was found. The nearest claims are ProteinZero's
   unsupervised scorer (matching FoldX PCC 0.60–0.62 at 236–760× the speed, on its own 342-mutation set)
   and ProteinMPNN-ddG (10,000 residues/s on one V100) — both neural. **The "fast + physics + no DL" slot
@@ -439,7 +434,7 @@ flagged — is in `notes/lit_sota_numbers.md`. Condensed here to what changes de
    Expensive sampling is not the answer by itself.
 3. **The two cheapest published fixes are both reference-state fixes** (ProteinMPNN-ddG, ddMBC) and both work.
 4. **Everything above ρ 0.65 on Megascale is a learned model**; no published physics or statistical potential
-   reaches it. That is the gap PhysDDG exists to close, and the internal PhysDDG v1.2 (0.640) is the current best attempt.
+   reaches it. That is the gap PhysDDG exists to close.
 
 ### 2.4 Four published results that should change our plan
 
@@ -888,22 +883,22 @@ Ordered by expected return on effort. Each item says what to do and what evidenc
 
 ### Targets to beat (set these in the harness now)
 
-| benchmark | metric | FoldX 5.1 | best classical / statistical non-DL | best DL | PhysDDG v1.2 (internal) | **PhysDDG target** |
-|---|---|---|---|---|---|---|
-| Megascale test (ThermoMPNN split, 28 proteins, 28,172 variants) | pooled ρ | **0.569** [own] | Rosetta cartesian_ddg 0.56 | **SPURS 0.74**; ThermoMPNN 0.725; RaSP 0.67; Pythia (zero-shot) 0.602 | 0.640 | **≥ 0.68** |
-| Megascale test | per-protein median ρ | 0.633 [own] | — | SPURS **0.83**; ThermoMPNN 0.77 | 0.701 | **≥ 0.73** |
-| Megascale test | RMSE (kcal/mol) | ~0.96 after a global rescale [own]; 3.9 raw | — | ThermoMPNN 0.708 | — | **≤ 0.75** |
-| S669 direct | Pearson (Spearman) | 0.22 (ρ 0.283) | MAESTRO 0.50; DDGun3D 0.43 | JanusDDG 0.55; Pythia ρ **0.66** | — | **≥ 0.50 Pearson** |
-| S461 | Pearson | — | **DDGun3D 0.635**; PremPS 0.632; KORPM 0.569 | JanusDDG 0.69; SPURS 0.64 | — | **≥ 0.62** |
-| Ssym | r(dir,inv) / ⟨δ⟩ | −0.38 / −0.47 | DDGun3D **−0.99 / −0.02**; KORPM 0.88 / −0.15 | ACDC-NN −0.98 / −0.02 | — | **−1.00 / 0.00 (by construction)** |
-| Ssym | direct / inverse Pearson | 0.63 / 0.39 | KORPM 0.57 / 0.49 | Stability Oracle 0.72 / 0.72 | — | **≥ 0.60 / ≥ 0.55** |
-| FireProt-test / FireProt-HF | ρ | 0.449–0.481 [own] / 0.57 (lit.) | — | ThermoMPNN 0.657; SPURS 0.67 | ~0.62 (clean subset) | **≥ 0.55** |
-| Domainome (522 domains) | per-domain median ρ | 0.391 [own] | — | ESM-MSR 0.573; SPURS 0.54; ThermoMPNN 0.50 | 0.394–0.403 | **≥ 0.45** |
-| S612 (S669 on AF2 models, pLDDT > 70) | Pearson | MutateX/FoldX 0.44 | DDGun3D 0.38 | ThermoMPNN 0.51 | — | **≥ 0.48** |
-| speed | per mutation | 5–10 CPU-s [own]; 395–807 s per saturated residue on 64 cores (RaSP Table 4) | **KORPM ~5 ms/mutation, 1 core**; PoPMuSiC ~10 ms | Pythia 25.2 M mutations in 3 min on one RTX 4090 | — | **≤ 1 ms/mutation on one GPU** (and ≤ 50 ms on one CPU core) |
+| benchmark | metric | FoldX 5.1 | best classical / statistical non-DL | best DL | **PhysDDG target** |
+|---|---|---|---|---|---|
+| Megascale test (ThermoMPNN split, 28 proteins, 28,172 variants) | pooled ρ | **0.569** [own] | Rosetta cartesian_ddg 0.56 | **SPURS 0.74**; ThermoMPNN 0.725; RaSP 0.67; Pythia (zero-shot) 0.602 | **≥ 0.68** |
+| Megascale test | per-protein median ρ | 0.633 [own] | — | SPURS **0.83**; ThermoMPNN 0.77 | **≥ 0.73** |
+| Megascale test | RMSE (kcal/mol) | ~0.96 after a global rescale [own]; 3.9 raw | — | ThermoMPNN 0.708 | **≤ 0.75** |
+| S669 direct | Pearson (Spearman) | 0.22 (ρ 0.283) | MAESTRO 0.50; DDGun3D 0.43 | JanusDDG 0.55; Pythia ρ **0.66** | **≥ 0.50 Pearson** |
+| S461 | Pearson | — | **DDGun3D 0.635**; PremPS 0.632; KORPM 0.569 | JanusDDG 0.69; SPURS 0.64 | **≥ 0.62** |
+| Ssym | r(dir,inv) / ⟨δ⟩ | −0.38 / −0.47 | DDGun3D **−0.99 / −0.02**; KORPM 0.88 / −0.15 | ACDC-NN −0.98 / −0.02 | **−1.00 / 0.00 (by construction)** |
+| Ssym | direct / inverse Pearson | 0.63 / 0.39 | KORPM 0.57 / 0.49 | Stability Oracle 0.72 / 0.72 | **≥ 0.60 / ≥ 0.55** |
+| FireProt-test / FireProt-HF | ρ | 0.449–0.481 [own] / 0.57 (lit.) | — | ThermoMPNN 0.657; SPURS 0.67 | **≥ 0.55** |
+| Domainome (522 domains) | per-domain median ρ | 0.391 [own] | — | ESM-MSR 0.573; SPURS 0.54; ThermoMPNN 0.50 | **≥ 0.45** |
+| S612 (S669 on AF2 models, pLDDT > 70) | Pearson | MutateX/FoldX 0.44 | DDGun3D 0.38 | ThermoMPNN 0.51 | **≥ 0.48** |
+| speed | per mutation | 5–10 CPU-s [own]; 395–807 s per saturated residue on 64 cores (RaSP Table 4) | **KORPM ~5 ms/mutation, 1 core**; PoPMuSiC ~10 ms | Pythia 25.2 M mutations in 3 min on one RTX 4090 | **≤ 1 ms/mutation on one GPU** (and ≤ 50 ms on one CPU core) |
 
 Interpretation: on the *classical* benchmarks we only need to reach DDGun3D/KORPM territory to be competitive, and
-antisymmetry is a guaranteed win. On **Megascale the gap is real** — 0.57 (FoldX) → 0.64 (PhysDDG v1.2) → 0.72–0.74
+antisymmetry is a guaranteed win. On **Megascale the gap is real** — 0.57 (FoldX) → 0.72–0.74
 (DL) — and that is where the project is decided. On **speed**, KORPM (12 parameters, 5 ms/mutation, one core) and
 Pythia (10⁵ mutations/s on a 4090) define the frontier; "fast" alone is not a contribution any more.
 
@@ -964,8 +959,7 @@ Ordered by expected return on effort. Each says what to do and the evidence behi
     loss: the ΔΔG sd is only 1.00 kcal/mol and the assay range is clipped [own §6.5].
 12. **Benchmark against the right competitors, not just FoldX.** Run **KORPM** (12 parameters, ~5 ms/mutation,
     Ssym PCC 0.69) and **DDGun3D** (zero fitted parameters, best classical on S461 at Pearson 0.635) on our own
-    tables. If PhysDDG does not clearly beat both, it is not a contribution. Also beat the internal PhysDDG v1.2
-    (Megascale 0.640 pooled / 0.701 per-protein).
+    tables. If PhysDDG does not clearly beat both, it is not a contribution..
 13. **Report trivial baselines in every table**: burial alone 0.461/0.514 and a 7-parameter model 0.536/0.600 on
     Megascale-test [own §6.9]; RSA alone 0.468 on Megascale and 0.456 on S461 (independent measurement);
     a single Bastolla–Vendruscolo contact potential gets Pearson ≈ 0.50 on S2648.

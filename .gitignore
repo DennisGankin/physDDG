@@ -38,3 +38,4 @@ results/diff_params/preds_*.parquet
 data/features/diffparams/
 release/
 logs/
+results/enm_flexibility/preds_domainome.parquet

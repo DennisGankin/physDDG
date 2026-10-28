@@ -1,6 +1,6 @@
 # Third-party data, parameters and tools
 
-The MIT and CC BY 4.0 licences of this repository cover only our own work. The items below keep their own terms.
+The MIT licence of this repository covers only our own work. The items below keep their own terms.
 Licences marked "checked" were read from the Zenodo record or the GitHub licence field on 2026-10-27. Items
 marked **to confirm** have no clear licence statement in the sources we could read; the repository owner should
 confirm them before publication.

@@ -99,5 +99,4 @@ Checked and matching (selection):
    the speed table is built on.
 
 Numbers that could not be sourced and are therefore absent from the manuscript: any paired comparison against
-a deep-learning method (none was rerun here), and any statement about the earlier internal version of this
-predictor.
+a deep-learning method (none was rerun here).

@@ -1,0 +1,11 @@
+term_added,cv_pooled_spearman
+solvation_hydrophobic,0.2054
+van_der_waals_clashes,0.3975
+entropy_mainchain,0.4167
+backbone_clash,0.4331
+torsional_clash,0.4475
+sidechain_hbond,0.4504
+entropy_sidechain,0.4979
+solvation_polar,0.5064
+electrostatics,0.521
+backbone_hbond,0.5383

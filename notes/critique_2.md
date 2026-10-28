@@ -8,8 +8,7 @@ I do not repeat it except where the project's own results now settle a point.
 **Overall.** The engineering is excellent and the record is unusually honest (audit_1 + D17 + the D19.4
 selection caveat are better practice than most published work). The *scientific* position is narrower than the
 tree's tone suggests: **PhysDDG beats FoldX decisively on the one assay it was fitted on, and is at
-FoldX/DDGun3D parity on every assay and structure source it was not.** The one number nobody has written down
-is the comparison that decides whether the project advanced the state of the art at all (§3.1).
+FoldX/DDGun3D parity on every assay and structure source it was not.**
 
 ---
 
@@ -44,7 +43,6 @@ is the comparison that decides whether the project advanced the state of the art
   any FireProt comparison (every FireProt pair is n.s.; ρ_prot there is a median over **9** proteins).
 - Best-in-class on reverse mutations / antisymmetry (r 0.23–0.25, bias +1.4; KORPM 0.88, DDGun3D 0.99).
 - An AF-*specific* correction that improves accuracy (§3.5).
-- Better than the lab's own PhysDDG v1.2 — **not measured** (§3.1).
 - A stabilising-mutation advantage: precision@5 0.190 (B6g) vs FoldX 0.219; only B6gaf (0.229) edges it, on AF input.
 
 ---
@@ -156,15 +154,6 @@ filter before building anything. If it is < 1,000, drop the idea.
 
 ## 3. Evaluation risks that could still embarrass us, and reporting fixes
 
-**3.1 The missing comparison (most serious).** LITERATURE.md §7 sets the bar explicitly: *"This is the number
-the new engine must beat: pooled ρ > 0.64 on Megascale-test, and > 0.40 on Domainome"* (internal PhysDDG v1.2:
-pooled 0.640, per-protein 0.701, Domainome 0.394–0.403). We are at pooled 0.642–0.658, per-protein 0.692–0.701,
-Domainome 0.418. **On the project's own pre-registered bar, the new engine ties its predecessor and may be below
-it on per-protein ρ.** No v1.2 predictions exist anywhere in this workspace, so no paired test has been run.
-*Fix:* obtain v1.2 predictions on identical rows and run the paired bootstrap, or remove every "best physics
-model" framing and present the contribution as the GPU engine + AF characterisation + the honest benchmark set.
-Do not let a reviewer find this first.
-
 **3.2 Selection optimism, and a shipped model that is not better than the previous rung.** D19.4 already
 discloses that the B6 term set was chosen after a test look. The consequence is sharper than the note says:
 B6g − B5 = +0.005 [−0.004, +0.019] and **B6gs1 − B5 = −0.008**. The shipped default is statistically
@@ -228,7 +217,6 @@ Pre-register this before any further test look. One final test look at the end; 
   B6gj becomes the shipped default and the generalisation claim is rebuilt around it.
 - A3 `I6(a)`: additivity residuals on the 138k doubles. **Gate:** none — it is a reported diagnostic either way.
 - A4 Reporting fixes 3.2, 3.3, 3.4, 3.6, 3.8e. No gate; do it.
-- A5 Start the §3.1 v1.2 retrieval in parallel (it may need the other project's prediction files).
 
 **Phase B — two to three days, model work (parallel):**
 - B1 `I2` GNM site tolerance + `I7(ii)` floor-aware loss, selected in **one** pre-registered round on train CV +

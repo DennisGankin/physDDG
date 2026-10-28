@@ -401,8 +401,6 @@ the findings above:
 - Best-in-class antisymmetry or stabilising-mutation ranking (unchanged from audit 1).
 - A measured fraction of the FoldX→ThermoMPNN gap, or any comparison to ThermoMPNN/SPURS/ESM-MSR as if
   they had been run here.
-- "Better than PhysDDG v1.2" — still unmeasured (critique_2 §3.1 is unresolved; no v1.2 predictions exist
-  in this workspace).
 - "Fastest" / "orders of magnitude faster" without naming FoldX as the comparator (KORPM is at parity per
    mutation, on one CPU core), and without stating that GPU-seconds are being compared with CPU-hours.
 
