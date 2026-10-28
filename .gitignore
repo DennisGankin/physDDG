@@ -36,3 +36,5 @@ results/evo_extension/*.parquet
 # differentiable-parameter study (scripts/111-113): large regenerable predictions and per-theta features
 results/diff_params/preds_*.parquet
 data/features/diffparams/
+release/
+logs/
