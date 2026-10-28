@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use PhysDDG, please cite it as below, and cite the datasets and tools listed in THIRD_PARTY.md."
+title: "PhysDDG: a GPU-batched, physics-inspired predictor of protein stability changes upon mutation"
+version: 1.0.0
+date-released: 2026-10-27
+license: MIT
+type: software
+authors:
+  - name: "<AUTHOR PLACEHOLDER>"
+abstract: >-
+  Structure-based predictor of single-substitution folding stability changes (ddG, positive = destabilising)
+  that uses force-field-style energy terms, a PDB-derived rotamer library and a small linear model; no deep
+  learning. The code, data curation, benchmarks and audits were produced by AI agents (Claude, Anthropic)
+  directed by an AI principal-investigator agent; see docs/PROVENANCE.md.
+keywords:
+  - protein stability
+  - ddG
+  - mutation effect prediction
+  - AlphaFold
+# identifiers:            # add the Zenodo DOI after the first release
+#   - type: doi
+#     value: "<DOI PLACEHOLDER>"
+# repository-code: "<REPOSITORY URL PLACEHOLDER>"
