@@ -9,7 +9,7 @@
 > several claims that were too strong. Please use the results with this in mind. Details:
 > [docs/PROVENANCE.md](docs/PROVENANCE.md).
 
-**New here? Start with the [interactive explainer](explainer/) (also published with GitHub Pages): the method in six steps, a worked example, how the agents arrived at it, and the key insights. Written versions: [explainer/METHOD.md](explainer/METHOD.md), [explainer/JOURNEY.md](explainer/JOURNEY.md), [explainer/INSIGHTS.md](explainer/INSIGHTS.md). Developer details (every script, speed table, run order) are in [README_DEV.md](README_DEV.md).**
+**New here? Start with the [interactive explainer](https://dennisgankin.github.io/physDDG/explainer/) (GitHub Pages): the method in six steps, a worked example, how the agents arrived at it, and the key insights. Written versions: [explainer/METHOD.md](explainer/METHOD.md), [explainer/JOURNEY.md](explainer/JOURNEY.md), [explainer/INSIGHTS.md](explainer/INSIGHTS.md). Developer details (every script, speed table, run order) are in [README_DEV.md](README_DEV.md).**
 
 PhysDDG predicts how a single amino-acid substitution changes the folding stability of a protein (ΔΔG, in
 kcal/mol; **positive = destabilising**). It needs a protein structure, either a crystal structure or an
@@ -77,7 +77,7 @@ is close to 0 at sites with pLDDT below 70; buried small-to-large substitutions 
 Python 3.10 or newer (tested with 3.12). A CUDA GPU is strongly recommended; the CPU works but is very slow (minutes for a few sites).
 
 ```bash
-git clone <repository URL> physddg && cd physddg
+git clone https://github.com/DennisGankin/physDDG.git physddg && cd physddg
 python -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt      # versions used for the results
 export PYTHONPATH=$PWD
@@ -180,7 +180,7 @@ KORPM and DDGun3D, which we do not distribute.
 
 ## Documentation
 
-- [explainer/](explainer/): the method, the research journey and the key insights (start here)
+- [Explainer website](https://dennisgankin.github.io/physDDG/explainer/) and [explainer/](explainer/) (Markdown): the method, the research journey and the key insights (start here)
 - [notes/ladder_physics.md](notes/ladder_physics.md): model card (terms, training data, results, known weaknesses)
 - [docs/PROVENANCE.md](docs/PROVENANCE.md): how the AI agents built this, and the decisions D1–D23
 - [REPORT.md](REPORT.md) and [RESEARCH_TREE.md](RESEARCH_TREE.md): project report and research log
