@@ -385,4 +385,5 @@ html = f"""<title>PhysDDG Explainer</title>
 """
 out = H / "physddg_explainer.html"
 out.write_text(html)
-print("wrote", out, len(html) // 1024, "KB")
+(H / "index.html").write_text(html)   # GitHub Pages entry point
+print("wrote", out, "and index.html", len(html) // 1024, "KB")
