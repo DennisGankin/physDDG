@@ -9,7 +9,7 @@
 > several claims that were too strong. Please use the results with this in mind. Details:
 > [docs/PROVENANCE.md](docs/PROVENANCE.md).
 
-**New here? Start with the [interactive explainer](https://dennisgankin.github.io/physDDG/explainer/) (GitHub Pages): the method in six steps, a worked example, how the agents arrived at it, and the key insights. Written versions: [explainer/METHOD.md](explainer/METHOD.md), [explainer/JOURNEY.md](explainer/JOURNEY.md), [explainer/INSIGHTS.md](explainer/INSIGHTS.md). Developer details (every script, speed table, run order) are in [README_DEV.md](README_DEV.md).**
+**New here? Start with the [interactive explainer](https://dennisgankin.github.io/physDDG/explainer/) ([Markdown versions: method](explainer/METHOD.md), [research journey](explainer/JOURNEY.md), [insights](explainer/INSIGHTS.md)): the method in six steps, a worked example, how the agents arrived at it, and the key insights. Developer details (every script, speed table, run order) are in [README_DEV.md](README_DEV.md).**
 
 PhysDDG predicts how a single amino-acid substitution changes the folding stability of a protein (ΔΔG, in
 kcal/mol; **positive = destabilising**). It needs a protein structure, either a crystal structure or an
